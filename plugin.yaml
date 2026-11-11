@@ -1,5 +1,5 @@
 name: onair
-version: 0.1.0
+version: 0.1.1
 manifest_version: 2
 description: >-
   Hermes inside your OBS. Control scenes, sources, recording and streaming by asking; design
@@ -47,7 +47,7 @@ config_schema:
     type: bool
     default: true
     label: Ask before public actions
-    description: "Hermes asks before going live, ending a stream, stopping a recording, deleting scenes, or changing scenes and sources while you are streaming."
+    description: "Hermes asks before going live, ending a stream, stopping a recording, deleting scenes, or changing scenes and sources while you are streaming. Pages written by the agent, local pages and raw OBS requests always ask, whatever this is set to."
   auto_marks:
     type: bool
     default: true

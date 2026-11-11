@@ -150,7 +150,8 @@ stateDiagram-v2
 | `core/director.py` | `start`, `mark`, `stop` | Mark-first ordering, best-effort decoration, OBS event handling |
 | `core/automark.py` | `observe` | Fail-then-fix pairing, bounded memory |
 | `core/reel.py` | `plan_reel`, `youtube_chapters`, `draft_wrapup`, `ReelBuilder.build` | FFmpeg argument lists, normalising clips, chapter cards |
-| `core/guard.py` | `review` | The approval policy |
+| `core/guard.py` | `review`, `safety` | The approval policy: audience prompts (can be switched off) and safety prompts (always asked) |
+| `core/weburl.py` | `public_web_url` | Refuses links that are not public http(s) addresses before OBS's browser gets them |
 | `core/app.py` | one method per user-visible operation | Composition, capture privacy, wrap-up, background work |
 
 ## Seams

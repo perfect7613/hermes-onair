@@ -21,6 +21,7 @@ from . import doctor, guard
 from .automark import AutoMarker
 from .director import Director
 from .errors import InvalidInput, NotFound, OnAirError
+from .weburl import public_web_url
 from .obs import Connector, Endpoint, ObsClient, websocket_connector
 from .reel import ReelBuilder, draft_wrapup, plan_reel
 from .stage import OVERLAY_SOURCE, Stage, media_file
@@ -36,6 +37,7 @@ PREVIEW_WIDTH = 960
 _DEFAULT_PLACEMENT = {"image": "center", "text": "center", "camera": "bottom-right"}
 MAX_THUMBS = 60
 MAX_SCREENSHOTS = 50
+_RAW_CAPTURE_REQUESTS = ("GetSourceScreenshot", "SaveSourceScreenshot")
 
 _ASK_INSTRUCTIONS = (
     "You are looking at a screenshot of the user's screen, taken from their OBS output while they "
@@ -157,10 +159,16 @@ class App:
                 raise InvalidInput("Adding a source needs 'kind' (browser, image, media, text, color, screen, window or camera).")
             if file:
                 file = str(_existing_file(file))
+            if kind == "browser" and url and not file:
+                url = public_web_url(url)
             settings = source_settings(kind, canvas=self.studio.canvas(), url=url, file=file, text=text, color=color)
             result = self.studio.add_source(scene, name, kind, settings, scale=scale,
                                             placement=placement or _DEFAULT_PLACEMENT.get(kind, "fullscreen"))
         elif action == "update":
+            if url:
+                url = public_web_url(url)
+            if file:
+                file = str(_existing_file(file))
             settings = {key: value for key, value in (("url", url), ("text", text), ("file", file), ("local_file", file)) if value}
             if not settings:
                 raise InvalidInput("Update needs 'url', 'file' or 'text'.")
@@ -233,12 +241,29 @@ class App:
         return {"shown": action, "overlay_in_scene": self.stage.overlay_installed()}
 
     def obs_request(self, request: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        return {"request": request, "response": self.studio.raw(_required(request, "request"), data)}
+        request, data = _required(request, "request"), dict(data or {})
+        if request in _RAW_CAPTURE_REQUESTS:  # same privacy rules as live_screenshot
+            if "sourceUuid" in data:  # OBS lets a UUID override the name the check below looks at
+                raise InvalidInput(f"{request} takes 'sourceName' here, not 'sourceUuid'.")
+            if not data.get("sourceName") or not isinstance(data["sourceName"], str):
+                raise InvalidInput(f"{request} needs 'sourceName'.")
+            self._capture_allowed(str(data["sourceName"]))
+        return {"request": request, "response": self.studio.raw(request, data)}
 
     def needs_approval(self, tool: str, args: dict[str, Any]) -> Optional[str]:
-        """The question to ask the user before the agent runs ``tool``, if any."""
-        if not self.host.settings().confirm_public_actions:
-            return None
+        """The question to ask the user before the agent runs ``tool``, if any.
+
+        Safety questions (a local page in OBS's browser, a raw request) are always asked. The
+        audience ones can be switched off in settings."""
+        def source_kind(name: str) -> str:
+            try:
+                return self.studio.source_kind(name)
+            except OnAirError:
+                return ""  # unknown: guard asks
+
+        question = guard.safety(tool, args, source_kind)
+        if question or not self.host.settings().confirm_public_actions:
+            return question
 
         def streaming() -> bool:
             try:
@@ -263,6 +288,11 @@ class App:
 
         Returns ``(image, source name)``. Thumbnails and the Desktop preview do not go through
         here: they stay on this machine."""
+        source = self._capture_allowed(source) or self.studio.current_scene()
+        return self.studio.screenshot(source, width=width), source
+
+    def _capture_allowed(self, source: str) -> str:
+        """``source`` (or the first allowed one) if the user's privacy settings let the model see it."""
         if self.capture_paused():
             raise InvalidInput("Screen capture is paused.", hint="Resume with /live resume.")
         allowed = self.host.settings().capture_sources
@@ -272,15 +302,24 @@ class App:
             elif source not in allowed:
                 raise InvalidInput(f"'{source}' is not on your capture list.",
                                    hint=f"Allowed: {', '.join(allowed)}. Change it in Settings → Plugins → On Air.")
-        source = source or self.studio.current_scene()
-        return self.studio.screenshot(source, width=width), source
+        return source
 
     def screenshot(self, source: str = "") -> dict[str, Any]:
         image, name = self.capture(source)
         folder = self.host.data_dir() / "screenshots"
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"shot-{time.strftime('%Y%m%d-%H%M%S')}.jpg"
-        path.write_bytes(image)
+        now = time.time()
+        stamp = f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}-{int(now * 1000) % 1000:03d}"
+        for attempt in range(1000):  # two shots in the same millisecond get different files
+            path = folder / (f"shot-{stamp}-{attempt}.jpg" if attempt else f"shot-{stamp}.jpg")
+            try:
+                with open(path, "xb") as handle:
+                    handle.write(image)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OnAirError("Could not save the screenshot: too many were taken at once.")
         for old in sorted(folder.glob("shot-*.jpg"))[:-MAX_SCREENSHOTS]:  # keep the folder from growing forever
             old.unlink(missing_ok=True)
         return {"path": str(path), "source": name, "bytes": len(image)}

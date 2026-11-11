@@ -244,8 +244,13 @@ def _wrap(draw: Any, text: str, font: Any, max_width: float) -> list[str]:
     return [*lines, current] if current else lines or [""]
 
 
+def _tool_env() -> dict[str, str]:
+    """The few variables ffmpeg needs. It does not get the rest of Hermes's environment (keys, tokens)."""
+    return {name: os.environ[name] for name in ("PATH", "HOME", "LANG", "SYSTEMROOT", "TEMP", "TMP") if name in os.environ}
+
+
 def _run(args: Sequence[str]) -> "subprocess.CompletedProcess[str]":
     try:
-        return subprocess.run(list(args), capture_output=True, text=True, timeout=900, check=False)
+        return subprocess.run(list(args), capture_output=True, text=True, timeout=900, check=False, env=_tool_env())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(list(args), 1, "", str(exc))

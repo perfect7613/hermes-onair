@@ -54,6 +54,11 @@ Effects (`confetti`, `fireworks`, `emoji`) are for real wins. Once per win.
   `vw` so it works at any resolution, inline all CSS and JavaScript, and load nothing from the
   network. CSS animations and canvas loops both work. A transparent background lets other
   sources show through.
+  The user is asked to approve every `html` scene, because the page runs in OBS's browser. Say
+  what the page does when you ask, and prefer a built-in kind or a `background` file when one
+  fits: those need no approval.
+- Web links (`url`, a GIF link, a scene `image`) must be public `http(s)` addresses. Local and
+  private-network addresses and `file://` links are refused; use a `file` path instead.
 - **Scenes from media you make with other tools.** Anything that leaves a file on disk can
   become a scene. Make the file first, then pass its absolute path:
   - `image_generate` → `live_design_scene` with `background` (a generated backdrop or poster).

@@ -131,6 +131,16 @@ becomes a mark, even when Hermes is not in focus.
   ending a stream, stopping a recording, deleting a scene or source, and any scene or source
   change, sound or clip while you are streaming. This uses Hermes's own approval prompt. Commands you type
   yourself act immediately. You can turn the prompts off in the plugin settings.
+- **Hermes always asks before running a page of its own in OBS's browser.** A scene built from
+  HTML the model wrote, or a browser source pointed at a local file, runs script inside OBS with
+  access to local files and the network, so each one needs your approval, on air or not. The
+  built-in scene designs, media scenes and the overlay are the plugin's own pages and do not ask.
+  Raw OBS requests that change something also always ask, and the prompt shows the request's data.
+  This setting cannot be switched off.
+- **Web links must be public.** A browser source, a GIF link or a scene image the model picks has
+  to be an `http` or `https` address that resolves to a public host. Addresses on this machine or
+  a private network (`localhost`, `192.168.x.x`, `169.254.169.254` and the like) and `file://`
+  links are refused. To show a local page, add it in OBS yourself.
 - **`/live stream` alone never goes live.** It needs `start`.
 - **Screen capture is yours to control.** `/live pause` (or the checkbox in the studio page)
   stops Hermes taking screenshots. *Sources Hermes may look at* in the settings restricts
@@ -145,7 +155,8 @@ Disclosure, as the catalog requires:
 - **Network:** connects to OBS's WebSocket server on your machine (`127.0.0.1:4455` by default,
   configurable). Nothing connects until you first use the plugin. No other network calls, no
   telemetry, no update checks. Web links you give it (a GIF, a page) are loaded by OBS's browser
-  source, not by the plugin.
+  source, not by the plugin; before handing one over, the plugin looks up the host name (a DNS
+  query) to refuse private addresses.
 - **Model calls:** `live_ask` and `/live ask` send a screenshot and your question to the model
   configured in Hermes, through Hermes. Capture is blocked while paused. Wrap-up generation
   sends session and mark text to that model, without screenshots. Mark thumbnails and the
@@ -160,7 +171,7 @@ Disclosure, as the catalog requires:
   files you build scenes from, highlight reels and `wrapup.md`. Replay clips and recordings are written by OBS to its own folder; the plugin
   reads them and never modifies or deletes them.
 - **Subprocesses:** runs `ffmpeg` and `ffprobe` from your `PATH` with fixed argument lists (no
-  shell) to render highlight reels.
+  shell) and a minimal environment (`PATH`, `HOME`, `LANG`) to render highlight reels.
 - **Background work:** while a session is running, one connection to OBS stays open and
   reconnects if OBS restarts. It closes when the session stops or the plugin unloads.
 - **Hooks:** `post_tool_call` reads the exit code of terminal commands during a session, for
@@ -231,8 +242,8 @@ Verified with OBS Studio 33.0.1 and obs-websocket 5.7.6:
   files and listed the resulting sources. Generation through a third-party voice API is not
   part of that test.
 
-The automated suite passes all 119 tests, including real FFmpeg rendering and regressions for
-media replacement, scene-name collisions, source ordering, file persistence and live approvals. Hermes plugin doctor
+The automated suite passes all 132 tests, including real FFmpeg rendering and regressions for
+media replacement, scene-name collisions, source ordering, file persistence, live approvals, private-address refusal and the always-ask rules. Hermes plugin doctor
 and validation also pass, registering all 12 tools and both hooks.
 
 ## Development

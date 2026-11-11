@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .errors import InvalidInput, NotFound, OnAirError
+from .weburl import public_web_url
 from .studio import Studio
 
 OVERLAY_SOURCE = "On Air Overlay"
@@ -71,13 +72,17 @@ def scene_key(name: str) -> str:
 
 
 def media_url(reference: str) -> str:
-    """A browser-loadable URL for an http(s) link or a local file path."""
+    """A browser-loadable URL for a public http(s) image link or a local image file."""
     reference = reference.strip()
-    if reference.startswith(("http://", "https://", "file://", "data:image/")):
+    if reference.startswith("data:image/"):
         return reference
+    if "://" in reference:
+        return public_web_url(reference)
     path = Path(reference).expanduser()
     if not path.is_file():
         raise InvalidInput(f"'{reference}' is not a web link or an existing file.")
+    if path.suffix.lower() not in MEDIA_TYPES["image"]:
+        raise InvalidInput(f"'{reference}' is not an image.", hint=f"Use one of: {', '.join(MEDIA_TYPES['image'])}")
     return path.resolve().as_uri()
 
 
@@ -266,7 +271,9 @@ class Stage:
                 self._remove_owned_source(name, prefix + name)
             item = self._studio.add_source(name, source, "browser", {
                 "is_local_file": True, "local_file": str(path), "width": canvas[0], "height": canvas[1],
-                "restart_when_active": True}, placement="fullscreen", on_top=False)
+                # OBS's default custom CSS makes <body> transparent, which would erase a page's own
+                # background. A scene is a whole picture, so its page decides.
+                "css": "", "restart_when_active": True}, placement="fullscreen", on_top=False)
             self._studio.raw("SetSceneItemIndex", {"sceneName": name, "sceneItemId": item["item_id"], "sceneItemIndex": 0})
             if not created:  # same path, new content: tell the browser source to reload it
                 try:

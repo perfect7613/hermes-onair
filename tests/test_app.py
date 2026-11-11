@@ -233,6 +233,41 @@ class StudioTests(AppCase):
         missing = self.tool("live_source", action="add", name="Nope", kind="image", file="/no/such.gif")
         self.assertIn("no file", missing["error"])
 
+    def test_browser_sources_only_open_public_web_pages(self):
+        for url in ("http://127.0.0.1:8080/", "http://169.254.169.254/latest/meta-data/", "http://private.test/admin",
+                    "file:///etc/passwd", "chrome://version"):
+            refused = self.tool("live_source", action="add", name="Bad", kind="browser", url=url)
+            self.assertEqual(refused["kind"], "InvalidInput", url)
+            self.assertNotIn("Bad", self.obs.inputs)
+        self.assertTrue(self.tool("live_source", action="add", name="Web", kind="browser", url="https://example.test/")["ok"])
+        refused = self.tool("live_source", action="update", name="Web", url="http://192.168.0.1/")
+        self.assertEqual(refused["kind"], "InvalidInput")
+        self.assertEqual(self.obs.inputs["Web"]["settings"]["url"], "https://example.test/")
+
+    def test_screenshots_taken_at_the_same_moment_get_their_own_files(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(8) as pool:
+            paths = [shot["path"] for shot in pool.map(lambda _: self.app.screenshot("Main"), range(24))]
+        self.assertEqual(len(set(paths)), 24)
+        self.assertTrue(all(Path(path).is_file() for path in paths))
+
+    def test_a_custom_page_keeps_its_own_background(self):
+        self.tool("live_design_scene", name="Purple", html="<body style='background:#60f'>hi</body>")
+        settings = next(v["settings"] for k, v in self.obs.inputs.items() if k.endswith("Purple"))
+        self.assertEqual(settings["css"], "")
+
+    def test_raw_screenshots_obey_the_capture_pause_and_list(self):
+        self.app.set_capture_paused(True)
+        paused = self.tool("live_obs_request", request="GetSourceScreenshot", data={"sourceName": "Main", "imageFormat": "png"})
+        self.assertIn("paused", paused["error"])
+        self.app.set_capture_paused(False)
+        self.host.configure(capture_sources=("Main",))
+        blocked = self.tool("live_obs_request", request="SaveSourceScreenshot", data={"sourceName": "Secret", "imageFilePath": "/tmp/x.png"})
+        self.assertIn("capture list", blocked["error"])
+        self.assertIn("sourceName", self.tool("live_obs_request", request="GetSourceScreenshot", data={})["error"])
+        by_uuid = self.tool("live_obs_request", request="GetSourceScreenshot", data={"sourceName": "Main", "sourceUuid": "abc"})
+        self.assertIn("sourceUuid", by_uuid["error"])
+
     def test_errors_tell_the_model_how_to_recover(self):
         result = self.tool("live_scene", action="switch", name="Nope")
         self.assertEqual(result["kind"], "NotFound")
@@ -274,6 +309,28 @@ class ApprovalTests(AppCase):
         self.assertIn("You are live", self.app.needs_approval("live_scene", {"action": "switch", "name": "Main"}))
         self.host.configure(confirm_public_actions=False)
         self.assertIsNone(self.app.needs_approval("live_output", {"action": "start", "output": "stream"}))
+
+    def test_safety_questions_are_asked_even_with_the_setting_off_and_off_air(self):
+        self.host.configure(confirm_public_actions=False)
+        self.assertIn("written by the agent", self.app.needs_approval("live_design_scene", {"name": "Intro", "html": "<b>x</b>"}))
+        self.assertIn("local file", self.app.needs_approval(
+            "live_source", {"action": "add", "name": "Page", "kind": "browser", "file": "/tmp/a.html"}))
+        self.assertIn("/tmp/out", self.app.needs_approval(
+            "live_obs_request", {"request": "SetRecordDirectory", "data": {"recordDirectory": "/tmp/out"}}))
+        self.assertIsNone(self.app.needs_approval("live_design_scene", {"name": "Intro", "kind": "starting-soon"}))
+
+    def test_a_file_on_a_browser_source_asks_whatever_its_extension(self):
+        page = self.dir / "page.png"
+        page.write_text("<script>fetch('http://127.0.0.1')</script>")
+        self.tool("live_source", action="add", name="Web", kind="browser", url="https://example.test/")
+        self.tool("live_source", action="add", name="Pic", kind="image", file=str(page))
+        self.assertIn("local file", self.app.needs_approval("live_source", {"action": "update", "name": "Web", "file": str(page)}))
+        self.assertIsNone(self.app.needs_approval("live_source", {"action": "update", "name": "Pic", "file": str(page)}))
+        self.assertIn("local file", self.app.needs_approval("live_source", {"action": "update", "name": "Missing", "file": str(page)}))
+
+    def test_a_file_update_asks_when_obs_cannot_say_what_the_source_is(self):
+        self.obs.down = True
+        self.assertIn("local file", self.app.needs_approval("live_source", {"action": "update", "name": "Pic", "file": "/tmp/a.png"}))
 
     def test_an_unreachable_obs_does_not_block_the_check(self):
         self.obs.down = True

@@ -310,6 +310,13 @@ class Studio:
         except ObsRequestError as exc:
             raise self._not_found(exc, f"There is no source named '{name}'.") from exc
 
+    def source_kind(self, name: str) -> str:
+        """The OBS kind of the existing source ``name`` (for example ``browser_source``)."""
+        try:
+            return str(self._obs.call("GetInputSettings", {"inputName": name}).get("inputKind") or "")
+        except ObsRequestError as exc:
+            raise self._not_found(exc, f"There is no source named '{name}'.") from exc
+
     def input_kind(self, kind: str) -> str:
         """The concrete OBS input kind for a friendly kind on this machine."""
         if kind not in SOURCE_KINDS:

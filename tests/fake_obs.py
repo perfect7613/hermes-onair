@@ -239,6 +239,12 @@ class FakeObs:
             raise Refuse(600, "No source was found.")
         return {"sceneItemId": self._add_item(d["sceneName"], d["sourceName"], d.get("sceneItemEnabled", True))}
 
+    def do_GetInputSettings(self, d):
+        if d["inputName"] not in self.inputs:
+            raise Refuse(600, "No source was found.")
+        entry = self.inputs[d["inputName"]]
+        return {"inputKind": entry["kind"], "inputSettings": dict(entry["settings"])}
+
     def do_SetInputSettings(self, d):
         if d["inputName"] not in self.inputs:
             raise Refuse(600, "No source was found.")

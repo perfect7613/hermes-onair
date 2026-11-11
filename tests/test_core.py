@@ -11,6 +11,7 @@ from onair.core import guard
 from onair.core.automark import AutoMarker
 from onair.core.errors import InvalidInput
 from onair.core.reel import draft_wrapup, format_chapters, plan_reel, timestamp, youtube_chapters
+from onair.core.weburl import public_web_url
 from onair.core.stage import media_url, render_scene, scene_config, slugify
 from onair.core.store import Store
 from onair.core.studio import obs_color, placement_rect, placement_transform, source_settings
@@ -77,6 +78,39 @@ class StageHelperTests(unittest.TestCase):
             self.assertTrue(media_url(handle.name).startswith("file://"))
         with self.assertRaises(InvalidInput):
             media_url("/no/such/file.gif")
+
+    def test_media_url_refuses_file_links_private_hosts_and_non_images(self):
+        for reference in ("file:///etc/passwd", "http://127.0.0.1:8080/a.gif", "http://private.test/a.gif",
+                          "ftp://example.test/a.gif", "javascript://x"):
+            with self.assertRaises(InvalidInput, msg=reference):
+                media_url(reference)
+        with tempfile.NamedTemporaryFile(suffix=".html") as handle, self.assertRaises(InvalidInput):
+            media_url(handle.name)
+        self.assertTrue(media_url("data:image/png;base64,AAAA").startswith("data:image/"))
+
+
+class WebUrlTests(unittest.TestCase):
+    def test_public_http_and_https_pass(self):
+        for url in ("https://example.test/page", "http://example.test:8080/x?y=1", "https://93.184.216.34/"):
+            self.assertEqual(public_web_url(url), url)
+
+    def test_non_web_schemes_are_refused(self):
+        for url in ("file:///etc/passwd", "chrome://settings", "data:text/html,<b>x", "javascript:alert(1)",
+                    "ftp://example.test/", "about:blank", "example.test/no-scheme", ""):
+            with self.assertRaises(InvalidInput, msg=url):
+                public_web_url(url)
+
+    def test_private_loopback_and_link_local_addresses_are_refused(self):
+        for url in ("http://127.0.0.1/", "http://localhost/", "http://10.1.2.3/", "http://192.168.1.1/admin",
+                    "http://172.16.0.9/", "http://169.254.169.254/latest/meta-data/", "http://[::1]/",
+                    "http://[fe80::1]/", "http://[::ffff:127.0.0.1]/", "http://0.0.0.0/", "http://2130706433/",
+                    "http://private.test/", "http://mixed.test/", "http://missing.test/", "http:///nohost",
+                    "http://127.0.0.1\\@example.test/", "http://169.254.169.254\\@example.test/latest/",
+                    "http://example.test\\@127.0.0.1/", "http://user:pw@example.test/", "http://127.0.0.1@example.test/",
+                    "http://exa\tmple.test/", "http://example.test/a b", "http://example.test:99999/", "http://example.test:x/"):
+            resolve = (lambda host: {"127.0.0.1"}) if "localhost" in url or "2130706433" in url else None
+            with self.assertRaises(InvalidInput, msg=url):
+                public_web_url(url, resolve)
 
     def test_slugs(self):
         self.assertEqual(slugify("Starting Soon!"), "starting-soon")
@@ -217,8 +251,31 @@ class GuardTests(unittest.TestCase):
                            ("live_ask", {"question": "?"}), ("live_obs_request", {"request": "GetInputList"})):
             self.assertIsNone(guard.review(tool, args, lambda: True), tool)
 
-    def test_raw_writes_ask(self):
-        self.assertTrue(self.review("live_obs_request", request="SetInputVolume"))
+    def test_raw_writes_always_ask_and_show_their_data(self):
+        question = guard.safety("live_obs_request", {"request": "SetRecordDirectory", "data": {"recordDirectory": "/tmp/x"}})
+        self.assertIn("SetRecordDirectory", question)
+        self.assertIn("/tmp/x", question)
+        long = guard.safety("live_obs_request", {"request": "SetInputSettings", "data": {"blob": "y" * 5000}})
+        self.assertIn("truncated", long)
+        self.assertLess(len(long), 500)
+        self.assertIsNone(guard.safety("live_obs_request", {"request": "GetInputList"}))
+
+    def test_local_and_agent_written_pages_always_ask(self):
+        self.assertIn("local file", guard.safety("live_source", {"action": "add", "name": "Page", "kind": "browser", "file": "/tmp/a.html"}))
+        update = {"action": "update", "name": "Page", "file": "/tmp/page.png"}
+        self.assertIn("local file", guard.safety("live_source", update), "kind unknown: ask")
+        self.assertIn("local file", guard.safety("live_source", update, lambda name: ""), "kind unknown: ask")
+        self.assertIn("local file", guard.safety("live_source", update, lambda name: "browser_source"), "the extension does not matter")
+        self.assertIsNone(guard.safety("live_source", update, lambda name: "image_source"))
+        self.assertIn("written by the agent", guard.safety("live_design_scene", {"name": "Intro", "html": "<b>x</b>"}))
+
+    def test_ordinary_sources_and_built_in_scenes_do_not_ask(self):
+        for tool, args in (("live_source", {"action": "add", "name": "Web", "kind": "browser", "url": "https://example.test"}),
+                           ("live_source", {"action": "add", "name": "Pic", "kind": "image", "file": "/tmp/a.png"}),
+                           ("live_source", {"action": "update", "name": "Label", "text": "hi"}),
+                           ("live_design_scene", {"name": "Intro", "kind": "starting-soon"}),
+                           ("live_design_scene", {"name": "Intro", "background": "/tmp/a.mp4"})):
+            self.assertIsNone(guard.safety(tool, args), args)
 
 
 class ReelPlanTests(unittest.TestCase):
