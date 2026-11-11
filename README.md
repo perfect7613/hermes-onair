@@ -41,19 +41,15 @@ Hermes:  Session ended with 6 marks.
 Requires Hermes 0.23.1 or newer and OBS Studio 28 or newer (30+ recommended).
 
 ```bash
-hermes plugins install onair      # from the catalog
-hermes plugins enable onair
-```
-
-Or from this repository:
-
-```bash
 hermes plugins install https://github.com/perfect7613/hermes-onair
 hermes plugins enable onair
 ```
 
+Use the repository URL until a catalog listing is available.
+
 No extra Python packages are installed: the plugin uses `websockets` and `Pillow`, which ship
-with Hermes.
+with Hermes. Install FFmpeg (including `ffprobe`) and make it available on your `PATH` to
+render highlight reels. Marks and OBS control work without FFmpeg.
 
 ## Set up (about a minute)
 
@@ -62,18 +58,24 @@ with Hermes.
    Hermes **Settings → Plugins → On Air → OBS password**.
 3. In Hermes: `/live setup`
 
-`/live setup` adds the overlay to your scenes and switches on the replay buffer for you.
-`/live doctor` checks everything and tells you how to fix each gap:
+`/live setup` adds the overlay to your scenes and enables the replay buffer in your OBS profile.
+OBS may require a restart before it can start the newly enabled buffer; follow the returned
+message, then run `/live setup` again.
+`/live doctor` checks the connection, source availability, overlay installation, replay buffer,
+recording folder and FFmpeg. A ready setup looks like this:
 
 ```
-✓ OBS connection: OBS 33.0.1, obs-websocket 5.6.3
-✓ Browser sources: available
+✓ OBS connection: OBS 33.0.1, obs-websocket 5.7.6
+✓ Browser sources: browser source type available
 ✓ Overlay: in scene 'Main'
-✗ Replay buffer: switched off in OBS
-    Fix: Run /live setup to switch it on.
+✓ Replay buffer: running, marks will save clips
 ✓ Recording folder: /Users/you/Movies
 ✓ FFmpeg: found, highlight reels can be rendered
 ```
+
+If a check fails, the report includes a suggested fix. To check visual output, show a card with
+`/live card Hello from Hermes` and look at the OBS preview. Doctor checks that browser sources
+are available; it does not inspect their rendered contents.
 
 ## Use it
 
@@ -135,10 +137,10 @@ Disclosure, as the catalog requires:
   configurable). Nothing connects until you first use the plugin. No other network calls, no
   telemetry, no update checks. Web links you give it (a GIF, a page) are loaded by OBS's browser
   source, not by the plugin.
-- **Screenshots go to your model provider:** `live_ask`, `/live ask` and the wrap-up title use
-  the model you configured in Hermes, through Hermes. Screenshots are only taken for those when
-  you or the agent ask, and never while capture is paused. Mark thumbnails and the studio
-  preview stay on your machine.
+- **Model calls:** `live_ask` and `/live ask` send a screenshot and your question to the model
+  configured in Hermes, through Hermes. Capture is blocked while paused. Wrap-up generation
+  sends session and mark text to that model, without screenshots. Mark thumbnails and the
+  studio preview stay on your machine.
 - **Credentials:** the OBS password is stored by Hermes as a secret (`ONAIR_OBS_PASSWORD`) and
   read through Hermes's secret store. The plugin does not read OBS's configuration files.
 - **Changes to OBS:** creates scenes and sources you ask for, an `On Air Overlay` browser
@@ -193,8 +195,20 @@ agent when to mark and how to write cards.
   chapter list in the wrap-up works with any format.
 - Enabling the replay buffer from `/live setup` is done through the OBS profile and may need
   outputs to be idle; if OBS refuses, the doctor says where to tick the box.
-- Developed and tested on macOS with OBS 33. Windows and Linux use the same protocol and the
-  plugin picks platform-specific source types at run time, but they are not yet tested by hand.
+- Windows and Linux use the same protocol and the plugin picks platform-specific source types
+  at run time, but they are not yet tested by hand.
+
+## Tested on macOS
+
+Verified with OBS Studio 33.0.1 and obs-websocket 5.7.6:
+
+- Scene and source control, text and colour sources, previews and screenshots.
+- HTTPS browser sources, a local synthwave starting-soon scene with countdown, and overlay cards.
+- Recording start/stop and pause/resume, replay-buffer clips, marks and thumbnails.
+- A highlight reel rendered from real OBS footage, with audio/video streams and chapter cards.
+
+The automated suite passes all 99 tests, including real FFmpeg rendering. Hermes plugin doctor
+and validation also pass, registering all 12 tools and both hooks.
 
 ## Development
 

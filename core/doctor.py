@@ -39,7 +39,7 @@ def run_checks(client: ObsClient, studio: Studio, stage: Stage, reel: ReelBuilde
 
     try:
         studio.input_kind("browser")
-        checks.append(Check("Browser sources", True, "available"))
+        checks.append(Check("Browser sources", True, "browser source type available"))
     except OnAirError:
         checks.append(Check("Browser sources", False, "this OBS build has no browser source",
                             "Install the official OBS build from obsproject.com; it includes browser sources."))
