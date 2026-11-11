@@ -23,7 +23,7 @@ from .director import Director
 from .errors import InvalidInput, NotFound, OnAirError
 from .obs import Connector, Endpoint, ObsClient, websocket_connector
 from .reel import ReelBuilder, draft_wrapup, plan_reel
-from .stage import Stage
+from .stage import OVERLAY_SOURCE, Stage
 from .store import MARK_KINDS, Session, Store
 from .studio import Studio, source_settings
 
@@ -35,6 +35,7 @@ PREVIEW_WIDTH = 960
 # Where a new source lands when the caller does not say: backgrounds fill the canvas, the rest do not.
 _DEFAULT_PLACEMENT = {"image": "center", "text": "center", "camera": "bottom-right"}
 MAX_THUMBS = 60
+MAX_SCREENSHOTS = 50
 
 _ASK_INSTRUCTIONS = (
     "You are looking at a screenshot of the user's screen, taken from their OBS output while they "
@@ -97,7 +98,8 @@ class App:
         """OBS, the scene on air and its sources, and the live session."""
         status = self.studio.status()
         status["sources"] = self.studio.sources(status["scene"]) if status["scene"] else []
-        status["session"] = self._session_summary(self.director.current())
+        status["overlay_installed"] = any(source["name"] == OVERLAY_SOURCE for source in status["sources"])
+        status["session"] = self.session_summary(self.director.current())
         status["capture_paused"] = self.capture_paused()
         return status
 
@@ -271,6 +273,8 @@ class App:
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"shot-{time.strftime('%Y%m%d-%H%M%S')}.jpg"
         path.write_bytes(image)
+        for old in sorted(folder.glob("shot-*.jpg"))[:-MAX_SCREENSHOTS]:  # keep the folder from growing forever
+            old.unlink(missing_ok=True)
         return {"path": str(path), "source": name, "bytes": len(image)}
 
     def ask(self, question: str, source: str = "") -> dict[str, Any]:
@@ -368,7 +372,7 @@ class App:
         session = self.director.current() or self.store.latest_session()
         marks = self.store.marks(session.id) if session else []
         body: dict[str, Any] = {
-            "session": self._session_summary(session),
+            "session": self.session_summary(session),
             "marks": [{**mark.to_dict(), "thumb": _thumb(mark.thumb_path) if index >= len(marks) - MAX_THUMBS else ""}
                       for index, mark in enumerate(marks)],
             "capture_paused": self.capture_paused(),
@@ -416,7 +420,8 @@ class App:
             logger.warning("Could not write wrapup.md: %s", exc)
         return wrapup
 
-    def _session_summary(self, session: Optional[Session]) -> Optional[dict[str, Any]]:
+    def session_summary(self, session: Optional[Session]) -> Optional[dict[str, Any]]:
+        """A session with its mark counts, without the marks themselves."""
         if session is None:
             return None
         marks = self.store.marks(session.id)

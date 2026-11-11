@@ -195,7 +195,7 @@ def _session(app: App, args: dict[str, Any]) -> dict[str, Any]:
     if action == "stop":
         return app.stop_session()
     session = app.director.current()
-    return {"session": app.snapshot()["session"] if session else None, "active": session is not None}
+    return {"session": app.session_summary(session), "active": session is not None}
 
 
 def _reel(app: App, args: dict[str, Any]) -> dict[str, Any]:

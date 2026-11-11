@@ -299,7 +299,6 @@ function Studio({ os }) {
   if (!state) return h('div', { className: cn('p-6 text-sm', muted) }, 'Connecting to OBS…')
   const obs = state.obs
   const connected = Boolean(state.ok && obs && obs.connected)
-  const overlayInstalled = connected && obs.sources.some(source => source.name === 'On Air Overlay')
 
   return h('div', { className: 'flex h-full flex-col gap-3 overflow-y-auto p-4 text-sm' },
     h('header', { className: 'flex flex-wrap items-center gap-2' },
@@ -319,7 +318,7 @@ function Studio({ os }) {
           h(Preview, { live: connected, scene: obs.scene }),
           h(Transport, { obs, session: state.session })),
         h('div', { className: 'flex flex-col gap-3' },
-          h(Scenes, { obs }), h(Sources, { obs }), h(OverlayBox, { installed: overlayInstalled }), h(Designer, { design: state.design }))),
+          h(Scenes, { obs }), h(Sources, { obs }), h(OverlayBox, { installed: obs.overlay_installed }), h(Designer, { design: state.design }))),
     state.ok ? h(Marks, { state, os }) : null)
 }
 

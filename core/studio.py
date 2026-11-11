@@ -361,7 +361,10 @@ class Studio:
                 self._obs.call("StartReplayBuffer", timeout=20)
             except ObsRequestError as exc:
                 if exc.code != CODE_OUTPUT_RUNNING:
-                    exc.hint = ("In OBS open Settings → Output → Replay Buffer, tick 'Enable Replay Buffer', "
+                    exc.hint = ("The replay buffer is now enabled in your OBS profile, but OBS has not picked it up. "
+                                "Restart OBS (or tick Settings → Output → Replay Buffer → Enable) and run /live setup again."
+                                if enabled_now else
+                                "In OBS open Settings → Output → Replay Buffer, tick 'Enable Replay Buffer', "
                                 "then run /live setup again.")
                     raise
         return {"output": "replay_buffer", "running": True, "changed": not active, "enabled_in_profile": enabled_now}
