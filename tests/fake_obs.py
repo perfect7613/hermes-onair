@@ -267,6 +267,11 @@ class FakeObs:
 
     def do_PressInputPropertiesButton(self, d): return {}
 
+    def do_TriggerMediaInputAction(self, d):
+        if d["inputName"] not in self.inputs:
+            raise Refuse(600, "No source was found.")
+        self.inputs[d["inputName"]]["restarts"] = self.inputs[d["inputName"]].get("restarts", 0) + 1
+
     def do_GetSourceScreenshot(self, d):
         if d["sourceName"] not in self.scenes and d["sourceName"] not in self.inputs:
             raise Refuse(600, "No source was found.")

@@ -2,7 +2,7 @@
 
 The rule: the agent never changes what an audience sees, and never ends something that cannot be
 resumed, without asking. Overlay cards and marks are exempt; putting those on screen is the
-product. ``review`` is pure so the policy can be read and tested in one place.
+product. Sounds and clips are not: an audience hears those, so playing one while live asks first. ``review`` is pure so the policy can be read and tested in one place.
 """
 
 from __future__ import annotations
@@ -49,6 +49,9 @@ def review(tool: str, args: dict[str, Any], is_streaming: Callable[[], bool]) ->
         if action in ("add", "remove", "show", "hide", "place", "update") and is_streaming():
             return f"You are live. Change source '{args.get('name', '')}' ({action}) on stream?"
         return None
+
+    if tool == "live_overlay" and action == "play" and is_streaming():
+        return "You are live. Play this sound or clip to your viewers?"
 
     if tool == "live_design_scene" and args.get("switch") and is_streaming():
         return f"You are live. Switch viewers to the new scene '{args.get('name', '')}'?"

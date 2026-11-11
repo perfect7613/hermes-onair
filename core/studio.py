@@ -301,6 +301,14 @@ class Studio:
             return
         self._obs.call("RemoveSceneItem", {"sceneName": scene, "sceneItemId": self._item_id(scene, name)})
 
+    def restart_media(self, name: str) -> None:
+        """Play a media source from its start."""
+        try:
+            self._obs.call("TriggerMediaInputAction", {
+                "inputName": name, "mediaAction": "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART"})
+        except ObsRequestError as exc:
+            raise self._not_found(exc, f"There is no source named '{name}'.") from exc
+
     def input_kind(self, kind: str) -> str:
         """The concrete OBS input kind for a friendly kind on this machine."""
         if kind not in SOURCE_KINDS:

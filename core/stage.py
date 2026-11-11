@@ -1,22 +1,42 @@
-"""What the plugin puts on screen: the overlay and designed scenes.
+"""What the plugin puts on screen: the overlay, designed scenes and media scenes.
 
-Both are local HTML files handed to OBS as browser sources. They live in the plugin's data
-directory (which survives plugin updates) so the paths OBS remembers never go stale.
+The overlay and designed scenes are local HTML files handed to OBS as browser sources. Media
+scenes are built from files other tools made (a generated image, a GIF, a rendered video, a
+spoken line) with OBS's own image and media sources. Everything OBS is pointed at lives in the
+plugin's data directory, which survives plugin updates and cache clean-ups, so the paths OBS
+remembers never go stale.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .errors import InvalidInput, OnAirError
+from .errors import InvalidInput, NotFound, OnAirError
 from .studio import Studio
 
 OVERLAY_SOURCE = "On Air Overlay"
 SCENE_SOURCE_PREFIX = "On Air Scene · "
 OVERLAY_EVENT = "onair"
+
+# Media scenes: one source per role, named after the scene, so building a scene twice updates it.
+IMAGE_SOURCE_PREFIX = "On Air Image · "
+VIDEO_SOURCE_PREFIX = "On Air Video · "
+TITLE_SOURCE_PREFIX = "On Air Title · "
+VOICE_SOURCE_PREFIX = "On Air Voice · "
+MUSIC_SOURCE_PREFIX = "On Air Music · "
+# One-shots: a single reused source each. They stop by themselves when the file ends.
+SOUND_SOURCE = "On Air Sound"
+CLIP_SOURCE = "On Air Clip"
+
+MEDIA_TYPES: dict[str, tuple[str, ...]] = {
+    "image": (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tga"),
+    "video": (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".flv", ".ts"),
+    "audio": (".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus"),
+}
 
 EFFECTS = ("confetti", "emoji", "fireworks")
 STYLES = ("aurora", "synthwave", "matrix", "starfield", "confetti", "bounce")
@@ -51,6 +71,26 @@ def media_url(reference: str) -> str:
     if not path.is_file():
         raise InvalidInput(f"'{reference}' is not a web link or an existing file.")
     return path.resolve().as_uri()
+
+
+def media_file(reference: str, role: str, allowed: tuple[str, ...]) -> tuple[Path, str]:
+    """The existing local file ``reference`` names and its media type, which must be in ``allowed``."""
+    reference = reference.strip()
+    if reference.startswith("file://"):
+        reference = reference[len("file://"):]
+    if reference.startswith(("http://", "https://")):
+        raise InvalidInput(f"The {role} must be a file on this computer, not a web link.",
+                           hint="Save the file first, or add a web page or web GIF with live_source kind 'browser'.")
+    path = Path(reference).expanduser()
+    if not path.is_file():
+        raise InvalidInput(f"The {role} file '{reference}' does not exist.",
+                           hint="Pass the absolute path the tool that made the file returned.")
+    suffix = path.suffix.lower()
+    kind = next((name for name, suffixes in MEDIA_TYPES.items() if suffix in suffixes), "")
+    if kind not in allowed:
+        wanted = ", ".join(ext for name in allowed for ext in MEDIA_TYPES[name])
+        raise InvalidInput(f"The {role} '{path.name}' is not a supported file type.", hint=f"Use one of: {wanted}")
+    return path.resolve(), kind
 
 
 def scene_config(kind: str, *, style: str = "", title: str = "", subtitle: Optional[str] = None,
@@ -151,36 +191,122 @@ class Stage:
 
     # ------------------------------------------------------------------ designed scenes
 
-    def design_scene(self, name: str, *, kind: str = "title", html: str = "", switch: bool = False,
+    def design_scene(self, name: str, *, kind: str = "title", html: str = "", background: str = "",
+                     voiceover: str = "", music: str = "", switch: bool = False,
                      **options: Any) -> dict[str, Any]:
-        """Create (or restyle) scene ``name`` as one full-canvas animated page.
+        """Create (or restyle) scene ``name``.
 
-        Either a built-in ``kind`` + ``style``, or the caller's own ``html`` document."""
+        The picture is one of: the caller's own ``html`` document, a ``background`` file (image,
+        GIF or video made by any other tool), or a built-in ``kind`` + ``style``. ``voiceover``
+        (spoken once each time the scene goes on air) and ``music`` (looped while it is on air)
+        are audio files and work with all three."""
         name = name.strip()
         if not name:
             raise InvalidInput("The scene needs a name.")
-        if html:
-            if len(html.encode("utf-8")) > MAX_CUSTOM_HTML_BYTES:
-                raise InvalidInput("Custom scene HTML is limited to 512 KB.")
-            document, described = html, {"kind": "custom"}
+        if html and background:
+            raise InvalidInput("Pass either 'html' or 'background', not both.")
+        # Validate every file before OBS is touched, so a bad path cannot leave half a scene.
+        picture = media_file(background, "background", ("image", "video")) if background else None
+        voice = media_file(voiceover, "voiceover", ("audio",)) if voiceover else None
+        bed = media_file(music, "music", ("audio",)) if music else None
+
+        if picture:
+            created = self._studio.create_scene(name)
+            described = self._media_background(name, *picture, title=str(options.get("title") or ""))
         else:
-            described = scene_config(kind, **options)
-            document = render_scene((self._assets / "scene.html").read_text("utf-8"), described)
-        path = self._publish(f"scenes/{slugify(name)}.html", document)
-        canvas = self._studio.canvas()
-        source = SCENE_SOURCE_PREFIX + name
-        created = self._studio.create_scene(name)
-        self._studio.add_source(name, source, "browser", {
-            "is_local_file": True, "local_file": str(path), "width": canvas[0], "height": canvas[1],
-            "restart_when_active": True}, placement="fullscreen", on_top=False)
-        if not created:  # same path, new content: tell the browser source to reload it
-            try:
-                self._studio.raw("PressInputPropertiesButton", {"inputName": source, "propertyName": "refreshnocache"})
-            except OnAirError:
-                pass
+            if html:
+                if len(html.encode("utf-8")) > MAX_CUSTOM_HTML_BYTES:
+                    raise InvalidInput("Custom scene HTML is limited to 512 KB.")
+                document, described = html, {"kind": "custom"}
+            else:
+                described = scene_config(kind, **options)
+                document = render_scene((self._assets / "scene.html").read_text("utf-8"), described)
+            path = self._publish(f"scenes/{slugify(name)}.html", document)
+            canvas = self._studio.canvas()
+            source = SCENE_SOURCE_PREFIX + name
+            created = self._studio.create_scene(name)
+            self._studio.add_source(name, source, "browser", {
+                "is_local_file": True, "local_file": str(path), "width": canvas[0], "height": canvas[1],
+                "restart_when_active": True}, placement="fullscreen", on_top=False)
+            if not created:  # same path, new content: tell the browser source to reload it
+                try:
+                    self._studio.raw("PressInputPropertiesButton", {"inputName": source, "propertyName": "refreshnocache"})
+                except OnAirError:
+                    pass
+            described = {"file": str(path), **described}
+        if voice:
+            described["voiceover"] = self._scene_audio(name, VOICE_SOURCE_PREFIX, "voiceover", voice[0], loop=False)
+        if bed:
+            described["music"] = self._scene_audio(name, MUSIC_SOURCE_PREFIX, "music", bed[0], loop=True)
         if switch:
             self._studio.switch_scene(name)
-        return {"scene": name, "created": created, "switched": switch, "file": str(path), **described}
+        return {"scene": name, "created": created, "switched": switch, **described}
+
+    def _media_background(self, scene: str, source_file: Path, media: str, *, title: str) -> dict[str, Any]:
+        """A full-canvas image, GIF or looping video, with an optional title across the lower third."""
+        path = self._import(scene, "background", source_file)
+        if media == "image":
+            keep, drop, kind, settings = IMAGE_SOURCE_PREFIX, VIDEO_SOURCE_PREFIX, "image", {"file": str(path)}
+        else:
+            keep, drop, kind = VIDEO_SOURCE_PREFIX, IMAGE_SOURCE_PREFIX, "media"
+            settings = {"is_local_file": True, "local_file": str(path), "looping": True,
+                        "restart_on_activate": True, "close_when_inactive": False, "clear_on_media_end": False}
+        # The background changed from a picture to a video, or back. OBS deletes an input a
+        # moment after it is asked to, so the old one is taken out of the scene first.
+        for delete in (False, True):
+            try:
+                self._studio.remove_source(scene, drop + scene, delete=delete)
+            except NotFound:
+                break
+        self._studio.add_source(scene, keep + scene, kind, settings, placement="fullscreen", on_top=False)
+        described: dict[str, Any] = {"kind": "media", "background": media, "file": str(path)}
+        if title.strip():
+            self._studio.add_source(scene, TITLE_SOURCE_PREFIX + scene, "text",
+                                    {"text": _clip(title, 80), "font": {"face": "Helvetica", "size": 160},
+                                     "outline": True, "drop_shadow": True},
+                                    placement="lower-third")
+            described["title"] = _clip(title, 80)
+        return described
+
+    def _scene_audio(self, scene: str, prefix: str, role: str, source_file: Path, *, loop: bool) -> str:
+        path = self._import(scene, role, source_file)
+        self._studio.add_source(scene, prefix + scene, "media", {
+            "is_local_file": True, "local_file": str(path), "looping": loop,
+            "restart_on_activate": True, "close_when_inactive": True, "clear_on_media_end": True}, on_top=False)
+        return str(path)
+
+    # ------------------------------------------------------------------ one-shots
+
+    def play(self, reference: str, *, placement: str = "fullscreen", scale: Optional[float] = None) -> dict[str, Any]:
+        """Play a sound or a video clip once in the scene on air. It ends by itself: the source
+        goes silent, and a clip disappears, when the file finishes."""
+        path, media = media_file(reference, "file", ("audio", "video"))
+        path = self._import("", "sound" if media == "audio" else "clip", path)
+        settings = {"is_local_file": True, "local_file": str(path), "looping": False,
+                    "restart_on_activate": False, "close_when_inactive": False, "clear_on_media_end": True}
+        if media == "audio":
+            self._studio.add_source("", SOUND_SOURCE, "media", settings, on_top=False)
+            source = SOUND_SOURCE
+        else:
+            self._studio.add_source("", CLIP_SOURCE, "media", settings, placement=placement, scale=scale)
+            source = CLIP_SOURCE
+        self._studio.restart_media(source)
+        return {"playing": media, "source": source, "file": str(path)}
+
+    def _import(self, scene: str, role: str, source_file: Path) -> Path:
+        """Copy a media file into the data directory, replacing what that role held before."""
+        directory = self._data_dir() / "media" / (slugify(scene) if scene else "_oneshot")
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{role}{source_file.suffix.lower()}"
+        if target.resolve() == source_file:
+            return target
+        for stale in directory.glob(f"{role}.*"):
+            if stale != target:
+                stale.unlink(missing_ok=True)
+        stat = source_file.stat()
+        if not target.exists() or (target.stat().st_size, int(target.stat().st_mtime)) != (stat.st_size, int(stat.st_mtime)):
+            shutil.copy2(source_file, target)
+        return target
 
     def _publish(self, relative: str, content: str) -> Path:
         path = self._data_dir() / relative

@@ -102,6 +102,93 @@ class StudioTests(AppCase):
         self.assertEqual(self.obs.current, "Party")
         self.assertTrue(self.obs.called("PressInputPropertiesButton"), "the browser source was told to reload")
 
+    def media(self, name: str) -> str:
+        path = self.dir / "made-by-other-tools" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b"media " + name.encode())
+        return str(path)
+
+    def test_a_scene_is_built_from_media_other_tools_made(self):
+        result = self.tool("live_design_scene", name="Intro", background=self.media("render.mp4"), title="Friday build",
+                           voiceover=self.media("hello.mp3"), music=self.media("bed.wav"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["background"], "video")
+        names = [item["sourceName"] for item in self.obs.scenes["Intro"]]
+        self.assertEqual(names[0], "On Air Video · Intro", "the background is at the bottom")
+        self.assertIn("On Air Title · Intro", names)
+        video = self.obs.inputs["On Air Video · Intro"]["settings"]
+        self.assertTrue(video["looping"])
+        voice = self.obs.inputs["On Air Voice · Intro"]["settings"]
+        self.assertFalse(voice["looping"], "a voice line is said once")
+        self.assertTrue(voice["restart_on_activate"], "and again each time the scene goes on air")
+        self.assertTrue(self.obs.inputs["On Air Music · Intro"]["settings"]["looping"])
+        self.assertEqual(self.obs.current, "Main")
+
+    def test_media_is_copied_so_the_scene_outlives_the_tool_that_made_the_file(self):
+        original = self.media("art.gif")
+        result = self.tool("live_design_scene", name="Art", background=original)
+        Path(original).unlink()
+        kept = Path(self.obs.inputs["On Air Image · Art"]["settings"]["file"])
+        self.assertTrue(kept.is_file())
+        self.assertIn(str(self.dir), str(kept))
+        self.assertEqual(result["background"], "image")
+
+    def test_rebuilding_a_media_scene_replaces_instead_of_stacking(self):
+        self.tool("live_design_scene", name="Loop", background=self.media("one.gif"))
+        self.tool("live_design_scene", name="Loop", background=self.media("two.gif"))
+        self.assertEqual(len(self.obs.scenes["Loop"]), 1)
+        swapped = self.tool("live_design_scene", name="Loop", background=self.media("three.mp4"))
+        self.assertFalse(swapped["created"])
+        self.assertEqual([item["sourceName"] for item in self.obs.scenes["Loop"]], ["On Air Video · Loop"])
+        self.assertNotIn("On Air Image · Loop", self.obs.inputs)
+
+    def test_a_voiceover_can_be_added_to_a_designed_scene(self):
+        result = self.tool("live_design_scene", name="Starting Soon", kind="starting-soon", voiceover=self.media("welcome.mp3"))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(len(self.obs.scenes["Starting Soon"]), 2)
+
+    def test_bad_media_is_refused_before_obs_is_touched(self):
+        for args, word in (({"background": "/nope/missing.mp4"}, "does not exist"),
+                           ({"background": self.media("notes.txt")}, "not a supported"),
+                           ({"background": "https://example.com/a.gif"}, "web link"),
+                           ({"background": self.media("ok.png"), "voiceover": self.media("pic.png")}, "voiceover"),
+                           ({"background": self.media("ok.png"), "html": "<html></html>"}, "not both")):
+            result = self.tool("live_design_scene", name="Broken", **args)
+            self.assertNotIn("ok", result)
+            self.assertIn(word, result["error"])
+        self.assertNotIn("Broken", self.obs.scenes)
+
+    def test_play_runs_a_sound_or_clip_once_in_the_scene_on_air(self):
+        said = self.tool("live_overlay", action="play", file=self.media("line.mp3"))
+        self.assertEqual(said["playing"], "audio")
+        sound = self.obs.inputs["On Air Sound"]
+        self.assertFalse(sound["settings"]["looping"])
+        self.assertEqual(sound["restarts"], 1)
+        self.tool("live_overlay", action="play", file=self.media("other.mp3"))
+        self.assertEqual(self.obs.inputs["On Air Sound"]["restarts"], 2)
+        self.assertEqual(len(self.obs.scenes["Main"]), 1, "one reused source, however many sounds")
+        clip = self.tool("live_overlay", action="play", file=self.media("sting.mp4"))
+        self.assertEqual(clip["playing"], "video")
+        self.assertTrue(self.obs.inputs["On Air Clip"]["settings"]["clear_on_media_end"], "the clip vanishes when it ends")
+
+    def test_playing_an_image_shows_it_as_a_sticker(self):
+        self.app.setup()
+        shown = self.tool("live_overlay", action="play", file=self.media("party.gif"))
+        self.assertEqual(shown["shown"], "sticker")
+
+    def test_playing_to_a_live_audience_asks_first(self):
+        self.assertIsNone(self.app.needs_approval("live_overlay", {"action": "play", "file": "x.mp3"}))
+        self.obs.streaming = True
+        self.assertIn("You are live", self.app.needs_approval("live_overlay", {"action": "play", "file": "x.mp3"}))
+        self.assertIsNone(self.app.needs_approval("live_overlay", {"action": "card", "text": "hi"}))
+
+    def test_media_and_play_commands(self):
+        self.assertIn("Usage:", self.live("media"))
+        self.assertIn("Scene 'Cool Loop' created from your image", self.live("media " + self.media("cool-loop.gif")))
+        self.assertIn("Scene 'Intro' created from your video", self.live(f"media {self.media('x.mp4')} Intro"))
+        self.assertIn("Playing your audio once", self.live("play " + self.media("ding.wav")))
+        self.assertIn("does not exist", self.live("play /nope.wav"))
+
     def test_overlay_is_not_added_to_designed_scenes(self):
         self.tool("live_design_scene", name="BRB", kind="brb")
         self.app.setup()

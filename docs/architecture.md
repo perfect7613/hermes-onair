@@ -22,7 +22,7 @@ flowchart TB
     subgraph domain["Domain"]
         direction LR
         director["director.py<br/>start, mark, stop"]
-        stage["stage.py<br/>overlay, designed scenes"]
+        stage["stage.py<br/>overlay, designed and media scenes"]
         studio["studio.py<br/>scenes, sources, outputs"]
         reel["reel.py<br/>plan, chapters, render"]
         policy["guard.py, automark.py, doctor.py<br/>pure policy and checks"]
@@ -145,7 +145,7 @@ stateDiagram-v2
 |---|---|---|
 | `core/obs.py` | `call`, `call_batch`, `subscribe`, `hold`, `close` | Lazy connect, auth, request/response correlation, reader and dispatcher threads, one retry when a request never left, reconnect with backoff |
 | `core/studio.py` | scenes, sources, outputs, `screenshot`, `status` | obs-websocket request names, per-platform input kinds, bounds-based transforms, idempotency (add twice = update) |
-| `core/stage.py` | overlay verbs, `design_scene` | HTML assets, publishing them to the data directory, the obs-browser event channel |
+| `core/stage.py` | overlay verbs, `design_scene`, `play` | HTML assets, publishing them and imported media to the data directory, which OBS source plays which file type, the obs-browser event channel |
 | `core/store.py` | sessions, marks, `claim_clip` | Schema, transactions, pairing a saved replay with its mark exactly once across processes |
 | `core/director.py` | `start`, `mark`, `stop` | Mark-first ordering, best-effort decoration, OBS event handling |
 | `core/automark.py` | `observe` | Fail-then-fix pairing, bounded memory |
@@ -179,6 +179,12 @@ Each has two real adapters, production and test:
   on screen.
 - **Assets are copied to the plugin data directory**, because `hermes plugins update` replaces
   the install directory and OBS remembers file paths.
+- **Media from other tools comes in as a file path, nothing more.** The plugin does not call
+  Hermes's image, video or speech tools; the agent does, and hands over the file. That keeps the
+  plugin working with any tool that writes a file, including ones that do not exist yet. Files
+  are copied in, because generators write to caches that get cleaned.
+- **One-shot sounds and clips need no timer.** They are non-looping media sources that clear
+  themselves when the file ends, so nothing has to come back later to remove them.
 - **Chapter cards are drawn with Pillow**, not FFmpeg's `drawtext`, which many FFmpeg builds
   (Homebrew's included) are compiled without.
 - **The Desktop half talks to the plugin over `ctx.register_rpc`**, not a separate

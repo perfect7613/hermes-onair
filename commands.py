@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import shlex
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -137,6 +138,25 @@ def _design(app: App, rest: str) -> str:
             f"Put it on air with /live scene {result['scene']}")
 
 
+def _media(app: App, rest: str) -> str:
+    words = shlex.split(rest)
+    if not words:
+        return ("Usage: /live media <image, GIF or video file> [scene name]\n"
+                "Makes a scene from the file. Videos loop. Example: /live media ~/Movies/intro.mp4 Intro")
+    name = " ".join(words[1:]) or Path(words[0]).stem.replace("-", " ").replace("_", " ").title()
+    result = app.design(name, background=words[0])
+    return (f"Scene '{result['scene']}' {'created' if result['created'] else 'updated'} from your {result['background']}. "
+            f"Put it on air with /live scene {result['scene']}")
+
+
+def _play(app: App, rest: str) -> str:
+    if not rest.strip():
+        return "Usage: /live play <audio or video file>"
+    words = shlex.split(rest)
+    result = app.overlay("play", file=words[0])
+    return "Sticker on screen for a few seconds." if "shown" in result else f"Playing your {result['playing']} once."
+
+
 def _overlay(action: str, done: str, **fixed: Any) -> Callable[[App, str], str]:
     def run(app: App, rest: str) -> str:
         app.overlay(action, text=rest.strip(), **fixed)
@@ -189,6 +209,8 @@ SUBCOMMANDS: dict[str, Sub] = {
     "stream": Sub("stream start|stop", "Go live or end the stream", _output("stream", "Stream")),
     "replay": Sub("replay start|stop|save", "Control the replay buffer", _output("replay_buffer", "Replay buffer")),
     "design": Sub("design <kind> [style] [title]", "Create an animated scene (starting-soon, brb, ending…)", _design),
+    "media": Sub("media <file> [scene name]", "Make a scene from an image, GIF or video file", _media),
+    "play": Sub("play <file>", "Play a sound or video clip once", _play),
     "card": Sub("card <text>", "Show a card on the overlay", _overlay("card", "Card on screen.")),
     "chapter": Sub("chapter <title>", "Flash a full-screen chapter title", _overlay("chapter", "Chapter title on screen.")),
     "celebrate": Sub("celebrate [confetti|fireworks|<emoji>]", "Confetti, fireworks or emoji rain", _celebrate),

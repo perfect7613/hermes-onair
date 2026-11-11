@@ -54,6 +54,21 @@ Effects (`confetti`, `fireworks`, `emoji`) are for real wins. Once per win.
   `vw` so it works at any resolution, inline all CSS and JavaScript, and load nothing from the
   network. CSS animations and canvas loops both work. A transparent background lets other
   sources show through.
+- **Scenes from media you make with other tools.** Anything that leaves a file on disk can
+  become a scene. Make the file first, then pass its absolute path:
+  - `image_generate` → `live_design_scene` with `background` (a generated backdrop or poster).
+  - `video_generate`, or a video rendered by a skill such as HyperFrames → `background`. Videos
+    loop, so a 5 to 10 second seamless loop is ideal.
+  - `text_to_speech` → `voiceover`. It is spoken once every time the scene goes on air: a
+    welcome line on the starting-soon scene, a sign-off on the ending scene. Keep it under ten
+    seconds.
+  - A GIF file → `background`. `title` is drawn across the lower third.
+  `voiceover` and `music` also work with the built-in kinds and with `html`.
+  Web links are not accepted for these; save the file first. The plugin keeps its own copy, so
+  the scene keeps working after the original is deleted.
+- `live_overlay` with `action: play` and `file` plays a sound or a video clip once in the scene
+  on air: a spoken line from `text_to_speech`, a sound effect, a short sting. It ends by itself.
+  One at a time, and rarely: viewers hear it. While the user is live, Hermes asks them first.
 - A designed scene is not put on air unless `switch: true`. Offer it; let the user decide when.
 - To add a webcam, a GIF or a browser page to a scene, use `live_source` with a `placement`
   such as `bottom-right`.

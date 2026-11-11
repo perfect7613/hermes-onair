@@ -23,7 +23,7 @@ from .director import Director
 from .errors import InvalidInput, NotFound, OnAirError
 from .obs import Connector, Endpoint, ObsClient, websocket_connector
 from .reel import ReelBuilder, draft_wrapup, plan_reel
-from .stage import OVERLAY_SOURCE, Stage
+from .stage import MEDIA_TYPES, OVERLAY_SOURCE, Stage
 from .store import MARK_KINDS, Session, Store
 from .studio import Studio, source_settings
 
@@ -201,7 +201,7 @@ class App:
         return result
 
     def overlay(self, action: str, *, text: str = "", title: str = "", effect: str = "confetti", emoji: str = "",
-                image: str = "", placement: str = "bottom-right", scale: float = 0.25,
+                image: str = "", file: str = "", placement: str = "", scale: Optional[float] = None,
                 seconds: Optional[float] = None) -> dict[str, Any]:
         stage = self.stage
         if action == "card":
@@ -215,13 +215,19 @@ class App:
         elif action == "effect":
             stage.effect(effect, emoji, seconds or 4)
         elif action == "sticker":
-            stage.sticker(_required(image, "image"), placement, scale, seconds or 6)
+            stage.sticker(_required(image, "image"), placement or "bottom-right", scale or 0.25, seconds or 6)
+        elif action == "play":
+            reference = _required(file or image, "file")
+            if Path(reference.strip()).suffix.lower() in MEDIA_TYPES["image"] or reference.strip().startswith(("http://", "https://")):
+                stage.sticker(reference, placement or "bottom-right", scale or 0.25, seconds or 6)
+                return {"shown": "sticker", "overlay_in_scene": self.stage.overlay_installed()}
+            return stage.play(reference, placement=placement or "fullscreen", scale=scale)
         elif action == "hide":
             stage.hide()
         elif action == "install":
             return self.stage.install_overlay()
         else:
-            raise InvalidInput(f"Unknown overlay action '{action}'. Use card, toast, thinking, chapter, effect, sticker, hide or install.")
+            raise InvalidInput(f"Unknown overlay action '{action}'. Use card, toast, thinking, chapter, effect, sticker, play, hide or install.")
         return {"shown": action, "overlay_in_scene": self.stage.overlay_installed()}
 
     def obs_request(self, request: str, data: Optional[dict[str, Any]] = None) -> dict[str, Any]:

@@ -39,13 +39,15 @@ def _reel(app: App, params: dict[str, Any]) -> dict[str, Any]:
 def _design(app: App, params: dict[str, Any]) -> dict[str, Any]:
     return app.design(str(params.get("name") or ""), kind=params.get("kind") or "title", style=params.get("style") or "",
                       title=params.get("title") or "", subtitle=params.get("subtitle"), accent=params.get("accent") or "",
-                      countdown=params.get("countdown"), image=params.get("image") or "", switch=bool(params.get("switch")))
+                      countdown=params.get("countdown"), image=params.get("image") or "", switch=bool(params.get("switch")),
+                      background=params.get("background") or "", voiceover=params.get("voiceover") or "",
+                      music=params.get("music") or "")
 
 
 def _overlay(app: App, params: dict[str, Any]) -> dict[str, Any]:
     return app.overlay(str(params.get("action") or ""), text=params.get("text") or "", title=params.get("title") or "",
                        effect=params.get("effect") or "confetti", emoji=params.get("emoji") or "",
-                       image=params.get("image") or "", seconds=params.get("seconds"))
+                       image=params.get("image") or "", file=params.get("file") or "", seconds=params.get("seconds"))
 
 
 METHODS: dict[str, Method] = {
