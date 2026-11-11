@@ -203,9 +203,10 @@ class Studio:
         status = self._obs.call("GetRecordStatus")
         return int(status.get("outputDuration") or 0) if status.get("outputActive") else None
 
-    def screenshot(self, source: str = "", *, width: int = 0, quality: int = 80) -> bytes:
-        """JPEG of ``source`` (default: the scene on air)."""
-        data: dict[str, Any] = {"sourceName": source or self.current_scene(), "imageFormat": "jpg",
+    def screenshot(self, source: str = "", *, width: int = 0, quality: int = 80,
+                   image_format: str = "jpg") -> bytes:
+        """Image of ``source`` (default: the scene on air). JPEG unless ``image_format`` says otherwise."""
+        data: dict[str, Any] = {"sourceName": source or self.current_scene(), "imageFormat": image_format,
                                 "imageCompressionQuality": quality}
         if width:
             data["imageWidth"] = max(8, min(width, 4096))

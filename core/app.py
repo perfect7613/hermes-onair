@@ -23,7 +23,7 @@ from .director import Director
 from .errors import InvalidInput, NotFound, OnAirError
 from .obs import Connector, Endpoint, ObsClient, websocket_connector
 from .reel import ReelBuilder, draft_wrapup, plan_reel
-from .stage import MEDIA_TYPES, OVERLAY_SOURCE, Stage
+from .stage import OVERLAY_SOURCE, Stage, media_file
 from .store import MARK_KINDS, Session, Store
 from .studio import Studio, source_settings
 
@@ -218,8 +218,10 @@ class App:
             stage.sticker(_required(image, "image"), placement or "bottom-right", scale or 0.25, seconds or 6)
         elif action == "play":
             reference = _required(file or image, "file")
-            if Path(reference.strip()).suffix.lower() in MEDIA_TYPES["image"] or reference.strip().startswith(("http://", "https://")):
-                stage.sticker(reference, placement or "bottom-right", scale or 0.25, seconds or 6)
+            path, media = media_file(reference, "file", ("image", "audio", "video"))
+            if media == "image":
+                path = stage._import("", "sticker", path)
+                stage.sticker(str(path), placement or "bottom-right", scale or 0.25, seconds or 6)
                 return {"shown": "sticker", "overlay_in_scene": self.stage.overlay_installed()}
             return stage.play(reference, placement=placement or "fullscreen", scale=scale)
         elif action == "hide":

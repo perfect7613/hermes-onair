@@ -46,6 +46,7 @@ def run_checks(client: ObsClient, studio: Studio, stage: Stage, reel: ReelBuilde
 
     if stage.overlay_installed():
         checks.append(Check("Overlay", True, f"in scene '{status['scene']}'"))
+        checks.extend(_overlay_drawing(stage, status))
     else:
         checks.append(Check("Overlay", False, f"not in scene '{status['scene']}'", "Run /live setup."))
 
@@ -66,6 +67,25 @@ def run_checks(client: ObsClient, studio: Studio, stage: Stage, reel: ReelBuilde
 
     checks.append(_ffmpeg(reel))
     return checks
+
+
+def _overlay_drawing(stage: Stage, status: dict[str, Any]) -> list[Check]:
+    """The check that the overlay is not just present but visible. It flashes a toast, so it is
+    skipped while an audience or a recording would see it."""
+    if status["streaming"]["active"] or status["recording"]["active"]:
+        return []
+    try:
+        drawn = stage.overlay_draws()
+    except OnAirError:
+        return []
+    if drawn is None:
+        return []
+    if drawn:
+        return [Check("Overlay drawing", True, "cards and designed scenes appear on screen")]
+    return [Check("Overlay drawing", False, "OBS is not drawing browser sources: the overlay stays blank",
+                  "Quit OBS and open it again, then run /live doctor. If it is still blank, turn off "
+                  "'Enable Browser Source Hardware Acceleration' in OBS Settings → Advanced and restart OBS. "
+                  "Media scenes (/live media) and sounds do not need the browser and keep working.")]
 
 
 def _ffmpeg(reel: ReelBuilder) -> Check:

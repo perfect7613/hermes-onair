@@ -9,9 +9,13 @@ remembers never go stale.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import re
 import shutil
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -60,6 +64,10 @@ _COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "scene"
+
+
+def scene_key(name: str) -> str:
+    return f"{slugify(name)[:80]}-{hashlib.sha256(name.encode()).hexdigest()[:16]}"
 
 
 def media_url(reference: str) -> str:
@@ -159,6 +167,35 @@ class Stage:
         except OnAirError:
             return False
 
+    draw_check_seconds = 4.0  # how long a healthy page gets to load and show the toast
+
+    def overlay_draws(self) -> Optional[bool]:
+        """Does OBS actually draw the overlay? Shows a two-second toast and looks for it.
+
+        OBS can report a browser source as present and healthy while its browser engine is not
+        drawing anything, and then every card and designed scene is silently blank. ``None``
+        means it could not be checked (no Pillow, or OBS returned no image)."""
+        try:
+            from PIL import Image
+        except ImportError:
+            return None
+        deadline = time.monotonic() + self.draw_check_seconds
+        sent = 0.0
+        while True:
+            if time.monotonic() - sent >= 1.0:  # again each second: a page still loading misses the first
+                self.toast("On Air overlay check", ttl=2)
+                sent = time.monotonic()
+            try:
+                picture = Image.open(io.BytesIO(self._studio.screenshot(
+                    OVERLAY_SOURCE, width=320, image_format="png"))).convert("RGBA")
+            except (OnAirError, OSError, ValueError):
+                return None
+            if any(low != high for low, high in picture.getextrema()):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.3)
+
     def card(self, body: str, title: str = "Hermes", ttl: float = 12) -> None:
         self._send(type="card", title=title, body=_clip(body, 220), ttl=ttl)
 
@@ -221,13 +258,16 @@ class Stage:
             else:
                 described = scene_config(kind, **options)
                 document = render_scene((self._assets / "scene.html").read_text("utf-8"), described)
-            path = self._publish(f"scenes/{slugify(name)}.html", document)
+            path = self._publish(f"scenes/{scene_key(name)}.html", document)
             canvas = self._studio.canvas()
             source = SCENE_SOURCE_PREFIX + name
             created = self._studio.create_scene(name)
-            self._studio.add_source(name, source, "browser", {
+            for prefix in (IMAGE_SOURCE_PREFIX, VIDEO_SOURCE_PREFIX, TITLE_SOURCE_PREFIX):
+                self._remove_owned_source(name, prefix + name)
+            item = self._studio.add_source(name, source, "browser", {
                 "is_local_file": True, "local_file": str(path), "width": canvas[0], "height": canvas[1],
                 "restart_when_active": True}, placement="fullscreen", on_top=False)
+            self._studio.raw("SetSceneItemIndex", {"sceneName": name, "sceneItemId": item["item_id"], "sceneItemIndex": 0})
             if not created:  # same path, new content: tell the browser source to reload it
                 try:
                     self._studio.raw("PressInputPropertiesButton", {"inputName": source, "propertyName": "refreshnocache"})
@@ -253,12 +293,10 @@ class Stage:
                         "restart_on_activate": True, "close_when_inactive": False, "clear_on_media_end": False}
         # The background changed from a picture to a video, or back. OBS deletes an input a
         # moment after it is asked to, so the old one is taken out of the scene first.
-        for delete in (False, True):
-            try:
-                self._studio.remove_source(scene, drop + scene, delete=delete)
-            except NotFound:
-                break
-        self._studio.add_source(scene, keep + scene, kind, settings, placement="fullscreen", on_top=False)
+        for prefix in (drop, SCENE_SOURCE_PREFIX):
+            self._remove_owned_source(scene, prefix + scene)
+        item = self._studio.add_source(scene, keep + scene, kind, settings, placement="fullscreen", on_top=False)
+        self._studio.raw("SetSceneItemIndex", {"sceneName": scene, "sceneItemId": item["item_id"], "sceneItemIndex": 0})
         described: dict[str, Any] = {"kind": "media", "background": media, "file": str(path)}
         if title.strip():
             self._studio.add_source(scene, TITLE_SOURCE_PREFIX + scene, "text",
@@ -266,7 +304,24 @@ class Stage:
                                      "outline": True, "drop_shadow": True},
                                     placement="lower-third")
             described["title"] = _clip(title, 80)
+        else:
+            self._remove_owned_source(scene, TITLE_SOURCE_PREFIX + scene)
         return described
+
+    def _remove_owned_source(self, scene: str, source: str) -> None:
+        for delete in (False, True):
+            try:
+                self._studio.remove_source(scene, source, delete=delete)
+            except NotFound:
+                break
+        # RemoveInput is deferred in OBS. Do not reorder a replacement while its
+        # predecessor still exists (especially during image/video/browser swaps).
+        deadline = time.monotonic() + 3
+        while any(item["inputName"] == source for item in
+                  self._studio.raw("GetInputList").get("inputs", [])):
+            if time.monotonic() >= deadline:
+                raise OnAirError(f"OBS has not finished removing '{source}'. Try rebuilding the scene again.")
+            time.sleep(0.05)
 
     def _scene_audio(self, scene: str, prefix: str, role: str, source_file: Path, *, loop: bool) -> str:
         path = self._import(scene, role, source_file)
@@ -295,17 +350,23 @@ class Stage:
 
     def _import(self, scene: str, role: str, source_file: Path) -> Path:
         """Copy a media file into the data directory, replacing what that role held before."""
-        directory = self._data_dir() / "media" / (slugify(scene) if scene else "_oneshot")
+        directory = self._data_dir() / "media" / (scene_key(scene) if scene else "_oneshot")
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{role}{source_file.suffix.lower()}"
         if target.resolve() == source_file:
             return target
+        # Size and timestamp are not content identity: generated files can share both.
+        # Replace atomically so OBS never reads a partially copied file.
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".import-", delete=False) as handle:
+            temporary = Path(handle.name)
+        try:
+            shutil.copy2(source_file, temporary)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
         for stale in directory.glob(f"{role}.*"):
             if stale != target:
                 stale.unlink(missing_ok=True)
-        stat = source_file.stat()
-        if not target.exists() or (target.stat().st_size, int(target.stat().st_mtime)) != (stat.st_size, int(stat.st_mtime)):
-            shutil.copy2(source_file, target)
         return target
 
     def _publish(self, relative: str, content: str) -> Path:

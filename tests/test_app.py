@@ -71,6 +71,24 @@ class SetupTests(AppCase):
         self.assertEqual(len(self.obs.scenes["Main"]), 1)
         self.assertEqual(len(self.obs.inputs), 1)
 
+    def test_doctor_notices_when_obs_shows_the_overlay_but_draws_nothing(self):
+        self.app.setup()
+        drawing = next(check for check in self.app.doctor() if check.name == "Overlay drawing")
+        self.assertTrue(drawing.ok)
+        self.obs.browser_engine_dead = True
+        self.app.stage.draw_check_seconds = 0.1
+        drawing = next(check for check in self.app.doctor() if check.name == "Overlay drawing")
+        self.assertFalse(drawing.ok)
+        self.assertIn("Quit OBS and open it again", drawing.fix)
+        self.assertIn("✗ Overlay drawing", self.live("doctor"))
+
+    def test_doctor_does_not_flash_the_overlay_at_an_audience(self):
+        self.app.setup()
+        self.obs.browser_events.clear()
+        self.obs.streaming = True
+        self.assertNotIn("Overlay drawing", [check.name for check in self.app.doctor()])
+        self.assertEqual(self.obs.browser_events, [])
+
     def test_doctor_with_obs_closed_gives_the_fix_and_stops(self):
         self.obs.down = True
         checks = self.app.doctor()

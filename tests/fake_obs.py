@@ -7,6 +7,7 @@ assert on what OBS would look like afterwards rather than on which requests were
 from __future__ import annotations
 
 import base64
+import io
 import json
 import queue
 import sqlite3
@@ -84,6 +85,7 @@ class FakeObs:
         self.replay_counter = 0
         self.record_ms = 0
         self.browser_events: list[dict[str, Any]] = []
+        self.browser_engine_dead = False  # OBS up, browser sources present, nothing drawn
         self.kinds = ["browser_source", "image_source", "ffmpeg_source", "text_ft2_source_v2",
                       "color_source_v3", "screen_capture", "window_capture", "av_capture_input_v2"]
 
@@ -275,7 +277,20 @@ class FakeObs:
     def do_GetSourceScreenshot(self, d):
         if d["sourceName"] not in self.scenes and d["sourceName"] not in self.inputs:
             raise Refuse(600, "No source was found.")
+        if d.get("imageFormat") == "png" and self.inputs.get(d["sourceName"], {}).get("kind") == "browser_source":
+            return {"imageData": "data:image/png;base64," + base64.b64encode(self._browser_picture()).decode()}
         return {"imageData": "data:image/jpg;base64," + base64.b64encode(FAKE_IMAGE).decode()}
+
+    def _browser_picture(self) -> bytes:
+        """What a browser source looks like: transparent, with a mark once the page was sent
+        something to show. Nothing is ever drawn while ``browser_engine_dead``."""
+        from PIL import Image
+        picture = Image.new("RGBA", (32, 18), (0, 0, 0, 0))
+        if self.browser_events and not self.browser_engine_dead:
+            picture.putpixel((4, 4), (255, 176, 0, 255))
+        buffer = io.BytesIO()
+        picture.save(buffer, "PNG")
+        return buffer.getvalue()
 
     def do_CallVendorRequest(self, d):
         if d["vendorName"] != "obs-browser":

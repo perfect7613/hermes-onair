@@ -53,7 +53,7 @@ def review(tool: str, args: dict[str, Any], is_streaming: Callable[[], bool]) ->
     if tool == "live_overlay" and action == "play" and is_streaming():
         return "You are live. Play this sound or clip to your viewers?"
 
-    if tool == "live_design_scene" and args.get("switch") and is_streaming():
-        return f"You are live. Switch viewers to the new scene '{args.get('name', '')}'?"
+    if tool == "live_design_scene" and is_streaming():
+        return f"You are live. Create or restyle scene '{args.get('name', '')}'? This can change a scene already on air."
 
     return None

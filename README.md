@@ -70,14 +70,16 @@ recording folder and FFmpeg. A ready setup looks like this:
 ✓ OBS connection: OBS 33.0.1, obs-websocket 5.7.6
 ✓ Browser sources: browser source type available
 ✓ Overlay: in scene 'Main'
+✓ Overlay drawing: cards and designed scenes appear on screen
 ✓ Replay buffer: running, marks will save clips
 ✓ Recording folder: /Users/you/Movies
 ✓ FFmpeg: found, highlight reels can be rendered
 ```
 
 If a check fails, the report includes a suggested fix. To check visual output, show a card with
-`/live card Hello from Hermes` and look at the OBS preview. Doctor checks that browser sources
-are available; it does not inspect their rendered contents.
+`/live card Hello from Hermes` and look at the OBS preview. When you are not recording or
+streaming, doctor also flashes a two-second toast on the overlay and checks that OBS really drew
+it.
 
 ## Use it
 
@@ -202,6 +204,10 @@ agent when to mark and how to write cards.
   OBS's Advanced Audio Properties.
 - The overlay is updated through obs-browser's event channel, which needs OBS's bundled browser
   source (included in the official builds for macOS, Windows and Linux).
+- OBS's browser engine can stop drawing during a long OBS session (seen on macOS with OBS 33):
+  browser sources are still listed, but cards and designed scenes are blank. `/live doctor`
+  detects this ("Overlay drawing") and restarting OBS fixes it. Media scenes and sounds use
+  OBS's own image and media sources and are not affected.
 - Chapter markers inside the recording file need OBS 30.2+ and the Hybrid MP4/MOV format. The
   chapter list in the wrap-up works with any format.
 - Enabling the replay buffer from `/live setup` is done through the OBS profile and may need
@@ -215,12 +221,18 @@ Verified with OBS Studio 33.0.1 and obs-websocket 5.7.6:
 
 - Scene and source control, text and colour sources, previews and screenshots.
 - Media scenes from a video (looping, with title and a voice line that plays once) and from a GIF;
-  one-shot sounds and clips that end by themselves.
-- HTTPS browser sources, a local synthwave starting-soon scene with countdown, and overlay cards.
+  one-shot sounds and clips that end by themselves. Voice restarts on scene re-entry, looping
+  music stops off-scene, and speech was verified in the recorded audio.
+- HTTPS browser sources, built-in and custom HTML scenes, restyling a scene, overlay cards,
+  stickers and effects, in a freshly started OBS; and the doctor's "Overlay drawing" check.
 - Recording start/stop and pause/resume, replay-buffer clips, marks and thumbnails.
 - A highlight reel rendered from real OBS footage, with audio/video streams and chapter cards.
+- A real Hermes chat created a video scene with title, voiceover and music from prepared local
+  files and listed the resulting sources. Generation through a third-party voice API is not
+  part of that test.
 
-The automated suite passes all 108 tests, including real FFmpeg rendering. Hermes plugin doctor
+The automated suite passes all 119 tests, including real FFmpeg rendering and regressions for
+media replacement, scene-name collisions, source ordering, file persistence and live approvals. Hermes plugin doctor
 and validation also pass, registering all 12 tools and both hooks.
 
 ## Development
@@ -232,6 +244,11 @@ python -m unittest discover -s tests -t .      # needs websockets and Pillow; ff
 hermes plugins doctor . --ci
 hermes plugins validate . --install-deps
 ```
+
+After changing Python tools or their parameters in a linked plugin, restart the running Hermes
+gateway with `hermes gateway restart --detach` and start a new chat. Desktop JavaScript hot reload
+does not refresh the gateway's Python tool schemas. The restart command checks for active work;
+allow ongoing sessions to finish before restarting.
 
 The tests run the whole plugin (application, tools, commands, Desktop RPC) against an in-memory
 OBS that speaks the real protocol, and render a real reel with FFmpeg. See
