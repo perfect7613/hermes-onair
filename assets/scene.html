@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  On Air designed scene. One self-contained animated page per scene: the plugin writes a copy of
+  this file with CONFIG filled in and adds it to OBS as a full-canvas browser source.
+  No network access. Everything is drawn on a canvas, so it loops forever at any resolution.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>On Air scene</title>
+<style>
+  :root { --accent: #ffb000; --u: 1vw; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #07080b; color: #f5f3ee;
+               font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  main { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+         justify-content: center; text-align: center; gap: calc(1.2 * var(--u)); padding: calc(6 * var(--u)); }
+  .kicker { font-size: calc(1.3 * var(--u)); letter-spacing: .34em; text-transform: uppercase;
+            color: var(--accent); font-weight: 700; }
+  h1 { font-size: calc(6.4 * var(--u)); line-height: 1.02; font-weight: 800; letter-spacing: -.03em;
+       text-shadow: 0 calc(.4 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,.55); max-width: 86vw; }
+  p { font-size: calc(2 * var(--u)); opacity: .82; max-width: 70vw; font-weight: 500; }
+  .count { font-size: calc(5 * var(--u)); font-weight: 700; font-variant-numeric: tabular-nums;
+           color: var(--accent); letter-spacing: .04em; }
+  img.art { max-height: 34vh; max-width: 46vw; border-radius: calc(1.2 * var(--u));
+            box-shadow: 0 calc(1 * var(--u)) calc(4 * var(--u)) rgba(0,0,0,.5); }
+  body.matrix h1, body.matrix .count { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  body.bounce main { justify-content: flex-end; padding-bottom: calc(5 * var(--u)); }
+  body.bounce h1 { font-size: calc(3 * var(--u)); opacity: .85; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<main>
+  <div class="kicker" id="kicker"></div>
+  <img class="art hidden" id="art" alt="">
+  <h1 id="title"></h1>
+  <p id="subtitle"></p>
+  <div class="count hidden" id="count"></div>
+</main>
+<script>
+const CONFIG = "__ONAIR_CONFIG__";
+(() => {
+  const cfg = typeof CONFIG === 'object' ? CONFIG : { kind: 'starting-soon', style: 'aurora', title: 'Starting soon' };
+  const accent = cfg.accent || '#ffb000';
+  document.documentElement.style.setProperty('--accent', accent);
+  document.body.classList.add(cfg.style || 'aurora');
+  const set = (id, text) => { const el = document.getElementById(id); el.textContent = text || ''; el.classList.toggle('hidden', !text); };
+  set('kicker', cfg.kicker); set('title', cfg.title); set('subtitle', cfg.subtitle);
+  if (cfg.image) { const art = document.getElementById('art'); art.src = cfg.image; art.classList.remove('hidden'); art.onerror = () => art.classList.add('hidden'); }
+
+  // Countdown: runs once from the moment the scene becomes visible, then shows the end text.
+  if (cfg.countdown > 0) {
+    const el = document.getElementById('count'); el.classList.remove('hidden');
+    const end = Date.now() + cfg.countdown * 1000;
+    const tick = () => {
+      const left = Math.max(0, Math.round((end - Date.now()) / 1000));
+      el.textContent = left > 0 ? String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0') : (cfg.countdown_done || 'Any second now');
+      if (left > 0) setTimeout(tick, 250);
+    };
+    tick();
+  }
+
+  const canvas = document.getElementById('bg'), g = canvas.getContext('2d');
+  let W = 0, H = 0;
+  const resize = () => { W = canvas.width = innerWidth; H = canvas.height = innerHeight; };
+  addEventListener('resize', resize); resize();
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const hex = (h, a) => { const n = parseInt(h.replace('#', ''), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+
+  const styles = {
+    aurora() {
+      const blobs = Array.from({ length: 5 }, (_, i) => ({ p: rand(0, 6.3), s: rand(.05, .14), r: rand(.35, .6), c: [accent, '#5d6bff', '#ff5d8f', '#3ddc97', '#b388ff'][i] }));
+      return t => {
+        g.fillStyle = '#07080b'; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'lighter';
+        for (const b of blobs) {
+          const x = W * (.5 + .38 * Math.cos(t * b.s + b.p)), y = H * (.5 + .34 * Math.sin(t * b.s * 1.3 + b.p * 2)), r = Math.max(W, H) * b.r;
+          const grad = g.createRadialGradient(x, y, 0, x, y, r); grad.addColorStop(0, hex(b.c, .34)); grad.addColorStop(1, hex(b.c, 0));
+          g.fillStyle = grad; g.fillRect(0, 0, W, H);
+        }
+        g.globalCompositeOperation = 'source-over';
+      };
+    },
+    synthwave() {
+      return t => {
+        const horizon = H * .56, sky = g.createLinearGradient(0, 0, 0, horizon);
+        sky.addColorStop(0, '#0b0420'); sky.addColorStop(1, '#3a0f4f'); g.fillStyle = sky; g.fillRect(0, 0, W, horizon);
+        const sun = g.createLinearGradient(0, horizon - H * .34, 0, horizon); sun.addColorStop(0, accent); sun.addColorStop(1, '#ff3d8b');
+        g.fillStyle = sun; g.beginPath(); g.arc(W / 2, horizon, H * .3, Math.PI, 0); g.fill();
+        g.fillStyle = '#3a0f4f'; for (let i = 0; i < 6; i++) g.fillRect(W / 2 - H * .32, horizon - H * (.03 + i * .045), H * .64, H * (.006 + i * .0022));
+        g.fillStyle = '#08020f'; g.fillRect(0, horizon, W, H - horizon);
+        g.strokeStyle = hex('#ff3d8b', .75); g.lineWidth = Math.max(1, W / 1200);
+        for (let i = -16; i <= 16; i++) { g.beginPath(); g.moveTo(W / 2 + i * W * .03, horizon); g.lineTo(W / 2 + i * W * .22, H); g.stroke(); }
+        const phase = (t * .35) % 1;
+        for (let i = 0; i < 14; i++) { const z = (i + phase) / 14, y = horizon + (H - horizon) * z * z; g.globalAlpha = .25 + z * .75; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+        g.globalAlpha = 1;
+      };
+    },
+    matrix() {
+      const size = Math.max(14, Math.round(innerWidth / 96)), glyphs = '01<>{}[]()=+-*/;:.$#@&アカサタナハマヤラワ';
+      let cols = [], last = 0;
+      return t => {
+        const n = Math.ceil(W / size); if (cols.length !== n) cols = Array.from({ length: n }, () => rand(-40, 0));
+        if (t - last < .05) return; last = t;
+        g.fillStyle = 'rgba(4,7,6,.16)'; g.fillRect(0, 0, W, H); g.font = size + 'px monospace';
+        for (let i = 0; i < n; i++) {
+          g.fillStyle = Math.random() < .04 ? '#f5f3ee' : hex(accent, .85);
+          g.fillText(glyphs[Math.floor(rand(0, glyphs.length))], i * size, cols[i] * size);
+          cols[i] = cols[i] * size > H && Math.random() > .975 ? 0 : cols[i] + 1;
+        }
+      };
+    },
+    starfield() {
+      const stars = Array.from({ length: 420 }, () => ({ x: rand(-1, 1), y: rand(-1, 1), z: rand(.05, 1) }));
+      return () => {
+        g.fillStyle = 'rgba(5,6,12,.5)'; g.fillRect(0, 0, W, H);
+        for (const s of stars) {
+          s.z -= .004; if (s.z <= .02) { s.x = rand(-1, 1); s.y = rand(-1, 1); s.z = 1; }
+          const x = W / 2 + s.x / s.z * W * .5, y = H / 2 + s.y / s.z * H * .5, r = (1 - s.z) * W / 520;
+          g.fillStyle = s.z < .3 ? accent : hex('#f5f3ee', 1 - s.z); g.beginPath(); g.arc(x, y, Math.max(r, .4), 0, 6.3); g.fill();
+        }
+      };
+    },
+    confetti() {
+      const colors = [accent, '#ff5d8f', '#3ddc97', '#5dadff', '#f5f3ee', '#b388ff'];
+      const bits = Array.from({ length: 160 }, () => ({ x: rand(0, 1), y: rand(-1, 1), v: rand(.05, .16), w: rand(.2, 1), rot: rand(0, 6.3), vr: rand(-2, 2), c: colors[Math.floor(rand(0, 6))], s: rand(.006, .014) }));
+      let prev = 0;
+      return t => {
+        const dt = Math.min(t - prev, .05); prev = t;
+        const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#141022'); bg.addColorStop(1, '#0a0d1a'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+        for (const b of bits) {
+          b.y += b.v * dt; b.rot += b.vr * dt; if (b.y > 1.05) { b.y = -.05; b.x = rand(0, 1); }
+          g.save(); g.translate(b.x * W + Math.sin(t * b.w + b.rot) * W * .02, b.y * H); g.rotate(b.rot); g.fillStyle = b.c;
+          g.fillRect(-b.s * W / 2, -b.s * W / 4, b.s * W, b.s * W / 2); g.restore();
+        }
+      };
+    },
+    bounce() {
+      // A logo-style box that drifts and changes colour on every wall hit.
+      const colors = [accent, '#ff5d8f', '#3ddc97', '#5dadff', '#b388ff'];
+      const box = { x: .3, y: .3, vx: .11, vy: .085, c: 0 }; let prev = 0;
+      const label = (cfg.badge || cfg.title || 'BRB').toUpperCase().slice(0, 14);
+      return t => {
+        const dt = Math.min(t - prev, .05); prev = t;
+        g.fillStyle = '#07080b'; g.fillRect(0, 0, W, H);
+        const bw = W * .24, bh = W * .1;
+        box.x += box.vx * dt; box.y += box.vy * dt;
+        if (box.x < 0 || box.x * W + bw > W) { box.vx *= -1; box.x = Math.min(Math.max(box.x, 0), (W - bw) / W); box.c++; }
+        if (box.y < 0 || box.y * H + bh > H * .8) { box.vy *= -1; box.y = Math.min(Math.max(box.y, 0), (H * .8 - bh) / H); box.c++; }
+        const color = colors[box.c % colors.length], x = box.x * W, y = box.y * H;
+        g.strokeStyle = color; g.lineWidth = W / 320; g.strokeRect(x, y, bw, bh);
+        g.fillStyle = color; g.font = `800 ${bh * .46}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(label, x + bw / 2, y + bh / 2, bw * .88);
+      };
+    },
+  };
+
+  const draw = (styles[cfg.style] || styles.aurora)();
+  const loop = now => { draw(now / 1000); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

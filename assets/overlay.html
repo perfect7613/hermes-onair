@@ -1,0 +1,168 @@
+<!doctype html>
+<!--
+  On Air overlay. One transparent page, added to OBS as a browser source.
+  It has no network access and no polling: OBS delivers every update as a "onair" CustomEvent
+  (obs-browser's emit_event). Each element hides itself on a timer, so a slow or lost update
+  can never leave something stuck on screen.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>On Air overlay</title>
+<style>
+  :root { --accent: #ffb000; --ink: #f5f3ee; --glass: rgba(14, 16, 20, 0.86); --u: 1vw; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+
+  .layer { position: absolute; opacity: 0; pointer-events: none; transition: opacity .35s ease, transform .45s cubic-bezier(.2,.9,.2,1); }
+  .layer.on { opacity: 1; transform: none !important; }
+
+  #card { left: calc(3 * var(--u)); bottom: calc(4 * var(--u)); max-width: calc(52 * var(--u));
+          transform: translateY(calc(2 * var(--u))); background: var(--glass);
+          border-radius: calc(1 * var(--u)); padding: calc(1.3 * var(--u)) calc(1.8 * var(--u));
+          border-left: calc(.45 * var(--u)) solid var(--accent);
+          box-shadow: 0 calc(.8 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,.45); }
+  #card .label { font-size: calc(.95 * var(--u)); letter-spacing: .16em; text-transform: uppercase;
+                 color: var(--accent); font-weight: 700; margin-bottom: calc(.4 * var(--u)); }
+  #card .body { font-size: calc(1.75 * var(--u)); line-height: 1.3; font-weight: 500;
+                display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  #card.thinking .body::after { content: ""; display: inline-block; width: 1.2em; text-align: left;
+                                animation: dots 1.2s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+  #toast { right: calc(3 * var(--u)); top: calc(3 * var(--u)); transform: translateX(calc(3 * var(--u)));
+           background: var(--glass); border-radius: 999px; padding: calc(.7 * var(--u)) calc(1.5 * var(--u));
+           font-size: calc(1.35 * var(--u)); font-weight: 600; display: flex; gap: calc(.7 * var(--u)); align-items: center;
+           box-shadow: 0 calc(.5 * var(--u)) calc(2 * var(--u)) rgba(0,0,0,.4); }
+  #toast .dot { width: calc(.9 * var(--u)); height: calc(.9 * var(--u)); border-radius: 50%; background: var(--accent); }
+  #toast.fail .dot { background: #ff5d5d; } #toast.fix .dot { background: #3ddc97; }
+
+  #chapter { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             background: radial-gradient(ellipse at center, rgba(8,9,12,.82), rgba(8,9,12,.55) 60%, transparent 100%);
+             transform: scale(1.03); text-align: center; }
+  #chapter .kicker { font-size: calc(1.2 * var(--u)); letter-spacing: .3em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  #chapter .title { font-size: calc(5 * var(--u)); font-weight: 800; letter-spacing: -.02em; margin-top: calc(.6 * var(--u)); max-width: 80vw; }
+
+  #sticker { transform: scale(.8); } #sticker img { display: block; max-width: 100%; max-height: 100%; border-radius: calc(.8 * var(--u)); }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+</style>
+</head>
+<body>
+  <canvas id="fx"></canvas>
+  <div id="chapter" class="layer"><div class="kicker"></div><div class="title"></div></div>
+  <div id="sticker" class="layer"><img alt=""></div>
+  <div id="card" class="layer"><div class="label"></div><div class="body"></div></div>
+  <div id="toast" class="layer"><span class="dot"></span><span class="text"></span></div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const timers = {};
+  // 0 when the value is missing, so `clamp(x, lo, hi) || fallback` picks the default.
+  const clamp = (n, lo, hi) => (n == null || isNaN(+n)) ? 0 : Math.min(Math.max(+n, lo), hi);
+
+  // Show `el` for `seconds`, then hide it. A later show replaces the pending hide.
+  function show(el, seconds) {
+    clearTimeout(timers[el.id]);
+    el.classList.add('on');
+    timers[el.id] = setTimeout(() => el.classList.remove('on'), seconds * 1000);
+  }
+  function hide(el) { clearTimeout(timers[el.id]); el.classList.remove('on'); }
+
+  const handlers = {
+    card(m) {
+      const card = $('card');
+      card.classList.remove('thinking');
+      card.querySelector('.label').textContent = m.title || 'Hermes';
+      card.querySelector('.body').textContent = m.body || '';
+      show(card, clamp(m.ttl, 3, 60) || 12);
+    },
+    thinking(m) {
+      const card = $('card');
+      card.classList.add('thinking');
+      card.querySelector('.label').textContent = m.title || 'Hermes';
+      card.querySelector('.body').textContent = m.body || 'thinking';
+      show(card, clamp(m.ttl, 3, 60) || 25);  // times out by itself if the answer never arrives
+    },
+    toast(m) {
+      const toast = $('toast');
+      toast.className = 'layer ' + (m.tone || '');
+      toast.querySelector('.text').textContent = m.body || '';
+      void toast.offsetWidth;
+      show(toast, clamp(m.ttl, 2, 20) || 4);
+    },
+    chapter(m) {
+      const chapter = $('chapter');
+      chapter.querySelector('.kicker').textContent = m.kicker || 'Chapter';
+      chapter.querySelector('.title').textContent = m.title || '';
+      show(chapter, clamp(m.ttl, 2, 15) || 3.5);
+    },
+    sticker(m) {
+      const sticker = $('sticker'), img = sticker.querySelector('img');
+      const size = (clamp(m.scale, 0.05, 1) || 0.25) * 100, pos = m.placement || 'bottom-right';
+      Object.assign(sticker.style, { left: '', right: '', top: '', bottom: '', width: size + 'vw', height: size * 9 / 16 + 'vw' });
+      if (pos === 'center') { sticker.style.left = (100 - size) / 2 + 'vw'; sticker.style.top = (100 - size) / 2 * 9 / 16 + 'vw'; }
+      else { sticker.style[pos.includes('left') ? 'left' : 'right'] = '3vw'; sticker.style[pos.includes('top') ? 'top' : 'bottom'] = '3vw'; }
+      img.onload = () => show(sticker, clamp(m.ttl, 1, 60) || 6);
+      img.onerror = () => hide(sticker);
+      img.src = m.url || '';
+    },
+    effect(m) { effects.start(m.name || 'confetti', m.emoji, clamp(m.ttl, 1, 15) || 4); },
+    hide() { ['card', 'toast', 'chapter', 'sticker'].forEach(id => hide($(id))); effects.stop(); },
+  };
+
+  // Particle effects: confetti, emoji rain, fireworks. One canvas, stops itself.
+  const effects = (() => {
+    const canvas = $('fx'), g = canvas.getContext('2d');
+    let parts = [], until = 0, raf = 0, mode = 'confetti', glyph = '🎉';
+    const colors = ['#ffb000', '#ff5d8f', '#3ddc97', '#5dadff', '#f5f3ee', '#b388ff'];
+    const rand = (a, b) => a + Math.random() * (b - a);
+    function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+    function spawn() {
+      const w = canvas.width, h = canvas.height;
+      if (mode === 'fireworks') {
+        const x = rand(.15, .85) * w, y = rand(.15, .55) * h, c = colors[Math.floor(rand(0, colors.length))];
+        for (let i = 0; i < 70; i++) { const a = rand(0, Math.PI * 2), s = rand(2, 9) * w / 1920;
+          parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, c, r: rand(2, 4) * w / 1920, kind: 'spark' }); }
+      } else {
+        for (let i = 0; i < (mode === 'emoji' ? 3 : 9); i++)
+          parts.push({ x: rand(0, w), y: -20, vx: rand(-1.5, 1.5), vy: rand(3, 8) * h / 1080, rot: rand(0, 6.3), vr: rand(-.2, .2),
+                       life: 1, c: colors[Math.floor(rand(0, colors.length))], r: rand(8, 16) * w / 1920, kind: mode });
+      }
+    }
+    let tick = 0;
+    function frame(now) {
+      g.clearRect(0, 0, canvas.width, canvas.height);
+      if (now < until && tick++ % (mode === 'fireworks' ? 22 : 2) === 0) spawn();
+      parts = parts.filter(p => p.life > 0 && p.y < canvas.height + 60);
+      for (const p of parts) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.kind === 'spark') { p.vy += .12; p.life -= .016; g.globalAlpha = Math.max(p.life, 0); g.fillStyle = p.c;
+          g.beginPath(); g.arc(p.x, p.y, p.r, 0, 6.3); g.fill(); }
+        else if (p.kind === 'emoji') { g.globalAlpha = 1; g.font = (p.r * 3.2) + 'px serif'; g.fillText(glyph, p.x, p.y); }
+        else { p.rot += p.vr; g.globalAlpha = 1; g.save(); g.translate(p.x, p.y); g.rotate(p.rot); g.fillStyle = p.c;
+          g.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2); g.restore(); }
+      }
+      g.globalAlpha = 1;
+      if (now < until || parts.length) raf = requestAnimationFrame(frame); else raf = 0;
+    }
+    return {
+      start(name, emoji, seconds) {
+        mode = ['confetti', 'emoji', 'fireworks'].includes(name) ? name : 'confetti';
+        glyph = emoji || '🎉'; resize(); until = performance.now() + seconds * 1000;
+        if (!raf) raf = requestAnimationFrame(frame);
+      },
+      stop() { until = 0; parts = []; },
+    };
+  })();
+
+  window.addEventListener('onair', event => {
+    const message = event.detail || {};
+    if (message.accent) document.documentElement.style.setProperty('--accent', message.accent);
+    const handler = handlers[message.type];
+    if (handler) { try { handler(message); } catch (error) { console.error(error); } }
+  });
+})();
+</script>
+</body>
+</html>

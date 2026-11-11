@@ -1,0 +1,75 @@
+name: onair
+version: 0.1.0
+manifest_version: 2
+description: >-
+  Hermes inside your OBS. Control scenes, sources, recording and streaming by asking; design
+  animated scenes; answer questions about your screen on an overlay; mark the good moments and
+  get the highlight reel, chapters and title when you stop.
+author: perfect7613
+license: MIT
+homepage: https://github.com/perfect7613/hermes-onair
+tags: [obs, streaming, recording, creators, video, desktop]
+requires_hermes: ">=0.23.1"
+
+provides_tools:
+  - live_status
+  - live_scene
+  - live_source
+  - live_design_scene
+  - live_output
+  - live_overlay
+  - live_screenshot
+  - live_ask
+  - live_mark
+  - live_session
+  - live_reel
+  - live_obs_request
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+
+config_schema:
+  obs_password:
+    type: secret
+    env: ONAIR_OBS_PASSWORD
+    label: OBS password
+    description: "From OBS: Tools → WebSocket Server Settings → Show Connect Info. Leave empty if OBS authentication is off."
+  obs_host:
+    type: str
+    default: "127.0.0.1"
+    label: OBS host
+    description: "Where OBS runs. Keep 127.0.0.1 for OBS on this computer."
+  obs_port:
+    type: int
+    default: 4455
+    label: OBS port
+  confirm_public_actions:
+    type: bool
+    default: true
+    label: Ask before public actions
+    description: "Hermes asks before going live, ending a stream, stopping a recording, deleting scenes, or changing scenes and sources while you are streaming."
+  auto_marks:
+    type: bool
+    default: true
+    label: Automatic marks
+    description: "During a session, mark the moment a build or test command fails and the moment it passes again."
+  clip_seconds:
+    type: int
+    default: 20
+    label: Clip length (seconds)
+    description: "How much of each marked moment goes into the highlight reel."
+  replay_seconds:
+    type: int
+    default: 30
+    label: Replay buffer length (seconds)
+    description: "Used when /live setup switches the OBS replay buffer on."
+  capture_sources:
+    type: list
+    default: []
+    label: Sources Hermes may look at
+    description: "Scene or source names. Empty means the scene on air. Screenshots for questions are sent to your model provider."
+  accent:
+    type: str
+    default: "#ffb000"
+    label: Accent colour
+    description: "Colour of the overlay and chapter cards, as #RRGGBB."
